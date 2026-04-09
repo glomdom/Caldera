@@ -45,16 +45,18 @@ public static class Program {
                 parseMaster.StartTask();
                 var registry = ParseRegistry(xmlString, parseMaster, enumParseTask);
 
-                var writeMaster = ctx.AddTask("[bold white]Writing definitions[/]", maxValue: 2, autoStart: false);
+                var writeMaster = ctx.AddTask("[bold white]Writing definitions[/]", maxValue: 3, autoStart: false);
                 var constsWriteTask = ctx.AddTask("Writing constants", maxValue: 1, autoStart: false);
                 var enumWriteTask = ctx.AddTask("Writing enums", maxValue: registry.Enums.Count, autoStart: false);
+                var bitmasksWriteTask = ctx.AddTask("Writing bitmasks", maxValue: registry.Bitmasks.Count, autoStart: false);
 
                 taskTypes[writeMaster.Id] = TaskType.Number;
                 taskTypes[constsWriteTask.Id] = TaskType.Number;
                 taskTypes[enumWriteTask.Id] = TaskType.Number;
 
                 writeMaster.StartTask();
-                await WriteDefinitionsAsync(registry, version, writeMaster, constsWriteTask, enumWriteTask);
+
+                await WriteDefinitionsAsync(registry, version, writeMaster, constsWriteTask, enumWriteTask, bitmasksWriteTask);
             });
     }
 
@@ -87,33 +89,66 @@ public static class Program {
         return Encoding.UTF8.GetString(memoryStream.ToArray());
     }
 
-    private static VkRegistry ParseRegistry(string xmlString, ProgressTask parseMaster, ProgressTask enumParseTask) {
+    private static VulkanRegistry ParseRegistry(string xmlString, ProgressTask parseMaster, ProgressTask enumParseTask) {
         var doc = XDocument.Parse(xmlString);
-        var enumNodes = doc.Descendants("enums").Where(x => x.Attribute("name")?.Value != "API Constants").ToList();
-        var apiConstantsNode = doc.Descendants("enums").First(x => x.Attribute("name")?.Value == "API Constants");
 
-        enumParseTask.MaxValue = enumNodes.Count;
+        var enumNodes = doc.Descendants("enums")
+            .Where(x => x.Attribute("name")?.Value != "API Constants" && x.Attribute("type")?.Value != "bitmask")
+            .ToList();
+
+        var bitmaskNodes = doc.Descendants("enums")
+            .Where(x => x.Attribute("name")?.Value != "API Constants" && x.Attribute("type")?.Value == "bitmask")
+            .ToList();
+
+        var apiConstantsNode = doc.Descendants("enums")
+            .First(x => x.Attribute("name")?.Value == "API Constants");
+
+        enumParseTask.MaxValue = enumNodes.Count + bitmaskNodes.Count;
         enumParseTask.StartTask();
 
         List<VulkanEnum> enums = [];
+        List<VulkanEnum> bitmasks = [];
         List<VulkanConstant> constants = [];
 
         foreach (var enumNode in enumNodes) {
             var rawEnumName = enumNode.GetUncheckedAttributeValue("name");
             var cleanEnumName = Utilities.CleanEnumName(rawEnumName);
-            var isBitmask = enumNode.GetUncheckedAttributeValue("type") == "bitmask";
-            var underlyingType = "int";
             var bitwidth = enumNode.MaybeGetAttributeValue("bitwidth");
 
-            if (isBitmask) {
-                underlyingType = bitwidth == "64" ? "ulong" : "uint";
-            } else if (bitwidth == "64") {
-                underlyingType = "long";
-            }
+            var underlyingType = bitwidth == "64" ? "long" : "int";
 
             List<VulkanEnumValue> values = [];
 
             foreach (var enumDef in enumNode.Elements("enum")) {
+                var memberName = enumDef.GetCheckedAttributeValue("name");
+                var cleanMemberName = Utilities.CleanEnumValue(memberName);
+
+                var exactValue = enumDef.Attribute("value")?.Value;
+                var alias = enumDef.Attribute("alias")?.Value;
+
+                var finalValue = exactValue != null ? exactValue.Replace("ULL", "UL")
+                    : alias != null ? Utilities.CleanEnumValue(alias)
+                    : string.Empty;
+
+                if (!string.IsNullOrEmpty(finalValue)) {
+                    values.Add(new VulkanEnumValue(cleanMemberName, finalValue));
+                }
+            }
+
+            enums.Add(new VulkanEnum(cleanEnumName, false, underlyingType, values));
+            enumParseTask.Increment(1);
+        }
+
+        foreach (var bitmaskNode in bitmaskNodes) {
+            var rawEnumName = bitmaskNode.GetUncheckedAttributeValue("name");
+            var cleanEnumName = Utilities.CleanEnumName(rawEnumName);
+            var bitwidth = bitmaskNode.MaybeGetAttributeValue("bitwidth");
+
+            var underlyingType = bitwidth == "64" ? "ulong" : "uint";
+
+            List<VulkanEnumValue> values = [];
+
+            foreach (var enumDef in bitmaskNode.Elements("enum")) {
                 var memberName = enumDef.GetCheckedAttributeValue("name");
                 var cleanMemberName = Utilities.CleanEnumValue(memberName);
 
@@ -131,7 +166,7 @@ public static class Program {
                 }
             }
 
-            enums.Add(new VulkanEnum(cleanEnumName, isBitmask, underlyingType, values));
+            bitmasks.Add(new VulkanEnum(cleanEnumName, true, underlyingType, values));
             enumParseTask.Increment(1);
         }
 
@@ -147,11 +182,19 @@ public static class Program {
 
         parseMaster.Increment(1);
 
-        return new VkRegistry(enums, constants);
+        return new VulkanRegistry(enums, bitmasks, constants);
     }
 
-    private static async Task WriteDefinitionsAsync(VkRegistry registry, string version, ProgressTask writeMaster, ProgressTask constsTask, ProgressTask enumTask) {
+    private static async Task WriteDefinitionsAsync(
+        VulkanRegistry registry,
+        string version,
+        ProgressTask writeMaster,
+        ProgressTask constsTask,
+        ProgressTask enumTask,
+        ProgressTask bitmasksTask
+    ) {
         Directory.CreateDirectory("autogen/enums");
+        Directory.CreateDirectory("autogen/bitmasks");
         Directory.CreateDirectory("autogen/constants");
 
         var prologue = Utilities.GetPrologueString(version);
@@ -184,6 +227,22 @@ public static class Program {
 
             await writer.WriteLineAsync("}");
             enumTask.Increment(1);
+        }
+
+        writeMaster.Increment(1);
+
+        bitmasksTask.StartTask();
+        foreach (var vulkanBitmask in registry.Bitmasks) {
+            await using var file = File.Create(Path.Combine("autogen", "bitmasks", $"{vulkanBitmask.Name}.cs"));
+            await using var writer = new StreamWriter(file);
+
+            await writer.WriteLineAsync($"{prologue}\n\n{genCodeAttribute}\n[Flags]\npublic enum {vulkanBitmask.Name} : {vulkanBitmask.UnderlyingType} {{");
+            foreach (var value in vulkanBitmask.Values) {
+                await writer.WriteLineAsync($"    {value.Name} = {value.Value},");
+            }
+
+            await writer.WriteLineAsync("}");
+            bitmasksTask.Increment(1);
         }
 
         writeMaster.Increment(1);
