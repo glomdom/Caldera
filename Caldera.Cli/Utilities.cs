@@ -15,4 +15,16 @@ public static class Utilities {
                 namespace Caldera;
                 """;
     }
+
+    public static string CleanEnumName(string raw) => raw.StartsWith("Vk") ? raw[2..] : raw;
+    public static string CleanEnumValue(string raw) => raw.StartsWith("VK_") ? raw[3..] : raw;
+    public static string NormalizeValue(string raw) => raw.Replace("LL", "L");
+
+    public static string GetTypeFromXml(string xmlType) => xmlType switch {
+        "uint32_t" => "uint",
+        "uint64_t" => "ulong",
+        "float" => "float",
+
+        _ => throw new ArgumentOutOfRangeException(nameof(xmlType), xmlType, $"Unrecognized type '{xmlType}'."),
+    };
 }

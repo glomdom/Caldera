@@ -100,7 +100,7 @@ public static class Program {
 
         foreach (var enumNode in enumNodes) {
             var rawEnumName = enumNode.GetUncheckedAttributeValue("name");
-            var cleanEnumName = CleanEnumName(rawEnumName);
+            var cleanEnumName = Utilities.CleanEnumName(rawEnumName);
             var isBitmask = enumNode.GetUncheckedAttributeValue("type") == "bitmask";
             var underlyingType = "int";
             var bitwidth = enumNode.MaybeGetAttributeValue("bitwidth");
@@ -115,7 +115,7 @@ public static class Program {
 
             foreach (var enumDef in enumNode.Elements("enum")) {
                 var memberName = enumDef.GetCheckedAttributeValue("name");
-                var cleanMemberName = CleanEnumValue(memberName);
+                var cleanMemberName = Utilities.CleanEnumValue(memberName);
 
                 var exactValue = enumDef.Attribute("value")?.Value;
                 var bitpos = enumDef.Attribute("bitpos")?.Value;
@@ -123,7 +123,7 @@ public static class Program {
 
                 var finalValue = exactValue != null ? exactValue.Replace("ULL", "UL")
                     : bitpos != null ? $"(1U << {bitpos})"
-                    : alias != null ? CleanEnumValue(alias)
+                    : alias != null ? Utilities.CleanEnumValue(alias)
                     : string.Empty;
 
                 if (!string.IsNullOrEmpty(finalValue)) {
@@ -139,10 +139,10 @@ public static class Program {
 
         foreach (var def in apiConstantsNode.Elements("enum")) {
             var memberName = def.GetCheckedAttributeValue("name");
-            var memberType = GetTypeFromXml(def.GetUncheckedAttributeValue("type"));
-            var value = NormalizeValue(def.GetUncheckedAttributeValue("value"));
+            var memberType = Utilities.GetTypeFromXml(def.GetUncheckedAttributeValue("type"));
+            var value = Utilities.NormalizeValue(def.GetUncheckedAttributeValue("value"));
 
-            constants.Add(new VulkanConstant(CleanEnumValue(memberName), memberType, value));
+            constants.Add(new VulkanConstant(Utilities.CleanEnumValue(memberName), memberType, value));
         }
 
         parseMaster.Increment(1);
@@ -209,16 +209,4 @@ public static class Program {
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine("[gray70]A C# Vulkan bindings forge.[/]");
     }
-
-    private static string CleanEnumName(string raw) => raw.StartsWith("Vk") ? raw[2..] : raw;
-    private static string CleanEnumValue(string raw) => raw.StartsWith("VK_") ? raw[3..] : raw;
-    private static string NormalizeValue(string raw) => raw.Replace("LL", "L");
-
-    private static string GetTypeFromXml(string xmlType) => xmlType switch {
-        "uint32_t" => "uint",
-        "uint64_t" => "ulong",
-        "float" => "float",
-
-        _ => throw new ArgumentOutOfRangeException(nameof(xmlType), xmlType, $"Unrecognized type '{xmlType}'."),
-    };
 }
