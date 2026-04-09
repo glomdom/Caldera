@@ -9,6 +9,7 @@ public static class Utilities {
                 //
                 //   Report issues to https://github.com/glomdom/Caldera
                 // </auto-generated>
+
                 using System.CodeDom.Compiler;
 
                 namespace Caldera;

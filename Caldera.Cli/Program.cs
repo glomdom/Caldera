@@ -160,7 +160,8 @@ public static class Program {
         constsTask.StartTask();
         await using (var file = File.Create(Path.Combine("autogen", "constants", "Constants.cs")))
         await using (var writer = new StreamWriter(file)) {
-            await writer.WriteLineAsync($"{prologue}\n\nnamespace Caldera;\n\n{genCodeAttribute}\npublic static class Constants {{");
+            await writer.WriteLineAsync($"{prologue}\n\n{genCodeAttribute}\npublic static class Constants {{");
+
             foreach (var constant in registry.Constants) {
                 await writer.WriteLineAsync($"    public const {constant.Type} {constant.Name} = {constant.Value};");
             }
@@ -176,7 +177,7 @@ public static class Program {
             await using var file = File.Create(Path.Combine("autogen", "enums", $"{vulkanEnum.Name}.cs"));
             await using var writer = new StreamWriter(file);
 
-            await writer.WriteLineAsync($"{prologue}\n\nnamespace Caldera;\n\n{genCodeAttribute}\npublic enum {vulkanEnum.Name} : {vulkanEnum.UnderlyingType} {{");
+            await writer.WriteLineAsync($"{prologue}\n\n{genCodeAttribute}\npublic enum {vulkanEnum.Name} : {vulkanEnum.UnderlyingType} {{");
             foreach (var value in vulkanEnum.Values) {
                 await writer.WriteLineAsync($"    {value.Name} = {value.Value},");
             }
