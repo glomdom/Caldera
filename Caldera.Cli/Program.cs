@@ -38,12 +38,13 @@ public static class Program {
 
                 var parseMaster = ctx.AddTask("[bold white]Parsing definitions[/]", maxValue: 2, autoStart: false);
                 var enumParseTask = ctx.AddTask("Parsing enums", autoStart: false);
+                var bitmaskParseTask = ctx.AddTask("Parsing bitmasks", autoStart: false);
 
                 taskTypes[parseMaster.Id] = TaskType.Number;
                 taskTypes[enumParseTask.Id] = TaskType.Number;
 
                 parseMaster.StartTask();
-                var registry = ParseRegistry(xmlString, parseMaster, enumParseTask);
+                var registry = ParseRegistry(xmlString, parseMaster, enumParseTask, bitmaskParseTask);
 
                 var writeMaster = ctx.AddTask("[bold white]Writing definitions[/]", maxValue: 3, autoStart: false);
                 var constsWriteTask = ctx.AddTask("Writing constants", maxValue: 1, autoStart: false);
@@ -89,7 +90,7 @@ public static class Program {
         return Encoding.UTF8.GetString(memoryStream.ToArray());
     }
 
-    private static VulkanRegistry ParseRegistry(string xmlString, ProgressTask parseMaster, ProgressTask enumParseTask) {
+    private static VulkanRegistry ParseRegistry(string xmlString, ProgressTask parseMaster, ProgressTask enumParseTask, ProgressTask bitmaskParseTask) {
         var doc = XDocument.Parse(xmlString);
 
         var enumNodes = doc.Descendants("enums")
@@ -103,7 +104,7 @@ public static class Program {
         var apiConstantsNode = doc.Descendants("enums")
             .First(x => x.Attribute("name")?.Value == "API Constants");
 
-        enumParseTask.MaxValue = enumNodes.Count + bitmaskNodes.Count;
+        enumParseTask.MaxValue = enumNodes.Count;
         enumParseTask.StartTask();
 
         List<VulkanEnum> enums = [];
@@ -139,6 +140,9 @@ public static class Program {
             enumParseTask.Increment(1);
         }
 
+        bitmaskParseTask.MaxValue = bitmaskNodes.Count;
+        bitmaskParseTask.StartTask();
+        
         foreach (var bitmaskNode in bitmaskNodes) {
             var rawEnumName = bitmaskNode.GetUncheckedAttributeValue("name");
             var cleanEnumName = Utilities.CleanEnumName(rawEnumName);
@@ -167,7 +171,7 @@ public static class Program {
             }
 
             bitmasks.Add(new VulkanEnum(cleanEnumName, true, underlyingType, values));
-            enumParseTask.Increment(1);
+            bitmaskParseTask.Increment(1);
         }
 
         parseMaster.Increment(1);
