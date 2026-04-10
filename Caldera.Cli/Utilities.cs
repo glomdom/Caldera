@@ -41,6 +41,7 @@ public static class Utilities {
         "uint32_t" => "uint",
         "uint64_t" => "ulong",
         "float" => "float",
+        "void" => "void",
 
         _ => throw new ArgumentOutOfRangeException(nameof(xmlType), xmlType, $"Unrecognized type '{xmlType}'."),
     };

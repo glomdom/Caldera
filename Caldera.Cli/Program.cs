@@ -1,12 +1,20 @@
 ﻿using System.Text;
 using System.Xml.Linq;
 using Caldera.Cli.Models;
+using Serilog;
 using Spectre.Console;
 
 namespace Caldera.Cli;
 
 public static class Program {
+    private static readonly Dictionary<string, string> BaseTypeLookup = [];
+
     public static async Task Main() {
+        Log.Logger = new LoggerConfiguration()
+            .MinimumLevel.Verbose()
+            .WriteTo.Async(x => x.File("logs/caldera.log", rollingInterval: RollingInterval.Day))
+            .CreateLogger();
+
         var version = Utilities.GetAssemblyVersion();
         Utilities.PrintBanner();
 
@@ -49,6 +57,8 @@ public static class Program {
 
                 await WriteDefinitionsAsync(registry, version, writeMaster, constsWriteTask, enumWriteTask, bitmasksWriteTask, baseTypesWriteTask);
             });
+
+        await Log.CloseAndFlushAsync();
     }
 
     private static async Task<string> DownloadVkXmlAsync(ProgressTask downloadTask) {
@@ -195,8 +205,30 @@ public static class Program {
             if (rawMemberName is null) continue;
 
             var memberName = Utilities.CleanEnumName(rawMemberName);
-            baseTypes.Add(new VulkanBaseType("nint", memberName));
 
+            var innerType = def.Element("type")?.Value;
+            var opaque = false;
+            var primitive = false;
+            string type;
+
+            var source = def.Value;
+            if (innerType == "void" && source.Contains('*')) {
+                type = "nint";
+                opaque = true;
+            } else if (innerType is not null) {
+                type = Utilities.GetTypeFromXml(innerType);
+                primitive = true;
+            } else if (source.Contains("struct") || source.Contains("@class") || source.Contains("void*")) {
+                type = "nint";
+                opaque = true;
+            } else {
+                type = "nint";
+                opaque = true;
+
+                Log.Warning("Unable to parse type for {Name}, falling back to nint", memberName);
+            }
+
+            baseTypes.Add(new VulkanBaseType(type, memberName, opaque, primitive));
             baseTypesParseTask.Increment(1);
         }
 
@@ -295,11 +327,18 @@ public static class Program {
         baseTypesTask.StartTask();
 
         foreach (var type in baseTypes) {
-            await using var file = File.Create(Path.Combine("autogen", "basetypes", $"{type.Name}.cs"));
-            await using var writer = new StreamWriter(file);
+            if (type.IsOpaque) {
+                await using var file = File.Create(Path.Combine("autogen", "basetypes", $"{type.Name}.cs"));
+                await using var writer = new StreamWriter(file);
 
-            await writer.WriteLineAsync($"{prologue}\n\n{genCodeAttribute}\npublic readonly record struct {type.Name} {{");
-            await writer.WriteLineAsync("}");
+                await writer.WriteLineAsync($"{prologue}\n\n{genCodeAttribute}\npublic readonly record struct {type.Name}(nint Handle) {{");
+                await writer.WriteLineAsync($"    public static readonly {type.Name} Null = new(0);");
+                await writer.WriteLineAsync("}");
+            } else if (type.IsPrimitive) {
+                BaseTypeLookup[type.Name] = type.Type;
+
+                Log.Debug("Populated lookup table with {Normal} -> {Lookup}", type.Name, type.Type);
+            }
 
             baseTypesTask.Increment(1);
         }
