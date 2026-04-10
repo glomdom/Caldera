@@ -142,7 +142,7 @@ public static class Program {
 
         bitmaskParseTask.MaxValue = bitmaskNodes.Count;
         bitmaskParseTask.StartTask();
-        
+
         foreach (var bitmaskNode in bitmaskNodes) {
             var rawEnumName = bitmaskNode.GetUncheckedAttributeValue("name");
             var cleanEnumName = Utilities.CleanEnumName(rawEnumName);
@@ -197,19 +197,25 @@ public static class Program {
         ProgressTask enumTask,
         ProgressTask bitmasksTask
     ) {
-        Directory.CreateDirectory("autogen/enums");
         Directory.CreateDirectory("autogen/bitmasks");
-        Directory.CreateDirectory("autogen/constants");
 
         var prologue = Utilities.GetPrologueString(version);
         var genCodeAttribute = $"[GeneratedCode(\"Caldera\", \"{version}\")]";
 
+        await WriteConstantsAsync(registry.Constants, prologue, genCodeAttribute, constsTask, writeMaster);
+        await WriteEnumsAsync(registry.Enums, prologue, genCodeAttribute, enumTask, writeMaster);
+        await WriteBitmasksAsync(registry.Bitmasks, prologue, genCodeAttribute, bitmasksTask, writeMaster);
+    }
+
+    private static async Task WriteConstantsAsync(List<VulkanConstant> constants, string prologue, string genCodeAttribute, ProgressTask constsTask, ProgressTask writeMaster) {
+        Directory.CreateDirectory("autogen/constants");
         constsTask.StartTask();
+
         await using (var file = File.Create(Path.Combine("autogen", "constants", "Constants.cs")))
         await using (var writer = new StreamWriter(file)) {
             await writer.WriteLineAsync($"{prologue}\n\n{genCodeAttribute}\npublic static class Constants {{");
 
-            foreach (var constant in registry.Constants) {
+            foreach (var constant in constants) {
                 await writer.WriteLineAsync($"    public const {constant.Type} {constant.Name} = {constant.Value};");
             }
 
@@ -218,14 +224,18 @@ public static class Program {
 
         constsTask.Increment(1);
         writeMaster.Increment(1);
+    }
 
+    private static async Task WriteEnumsAsync(List<VulkanEnum> enums, string prologue, string genCodeAttribute, ProgressTask enumTask, ProgressTask writeMaster) {
+        Directory.CreateDirectory("autogen/enums");
         enumTask.StartTask();
-        foreach (var vulkanEnum in registry.Enums) {
-            await using var file = File.Create(Path.Combine("autogen", "enums", $"{vulkanEnum.Name}.cs"));
+
+        foreach (var def in enums) {
+            await using var file = File.Create(Path.Combine("autogen", "enums", $"{def.Name}.cs"));
             await using var writer = new StreamWriter(file);
 
-            await writer.WriteLineAsync($"{prologue}\n\n{genCodeAttribute}\npublic enum {vulkanEnum.Name} : {vulkanEnum.UnderlyingType} {{");
-            foreach (var value in vulkanEnum.Values) {
+            await writer.WriteLineAsync($"{prologue}\n\n{genCodeAttribute}\npublic enum {def.Name} : {def.UnderlyingType} {{");
+            foreach (var value in def.Values) {
                 await writer.WriteLineAsync($"    {value.Name} = {value.Value},");
             }
 
@@ -234,9 +244,13 @@ public static class Program {
         }
 
         writeMaster.Increment(1);
+    }
 
+    private static async Task WriteBitmasksAsync(List<VulkanEnum> bitmasks, string prologue, string genCodeAttribute, ProgressTask bitmasksTask, ProgressTask writeMaster) {
+        Directory.CreateDirectory("autogen/bitmasks");
         bitmasksTask.StartTask();
-        foreach (var vulkanBitmask in registry.Bitmasks) {
+
+        foreach (var vulkanBitmask in bitmasks) {
             await using var file = File.Create(Path.Combine("autogen", "bitmasks", $"{vulkanBitmask.Name}.cs"));
             await using var writer = new StreamWriter(file);
 
