@@ -1,5 +1,6 @@
 ﻿using System.Text;
 using System.Xml.Linq;
+using Caldera.Cli.Columns;
 using Caldera.Cli.Models;
 using Serilog;
 using Spectre.Console;
@@ -24,38 +25,46 @@ public static class Program {
             .Columns(
                 new TaskDescriptionColumn(),
                 new ProgressBarColumn(),
-                new PercentageColumn(),
                 new MetricsColumn(taskTypes),
                 new SpinnerColumn())
             .StartAsync(async ctx => {
                 var downloadTask = ctx.AddTask("Downloading [yellow]vk.xml[/]");
                 taskTypes[downloadTask.Id] = TaskType.Download;
+
                 var xmlString = await DownloadVkXmlAsync(downloadTask);
 
-                var parseMaster = ctx.AddTask("[bold white]Parsing definitions[/]", maxValue: 3, autoStart: false);
-                var enumParseTask = ctx.AddTask("Parsing enums", autoStart: false);
-                var bitmaskParseTask = ctx.AddTask("Parsing bitmasks", autoStart: false);
-                var baseTypeParseTask = ctx.AddTask("Parsing base types", autoStart: false);
+                var parseMaster = ctx.AddTask("[bold white]Parsing definitions[/]", maxValue: 4, autoStart: false);
+                var enumParseTask = ctx.AddTask("Parsing enums", autoStart: false, maxValue: 0);
+                var bitmaskParseTask = ctx.AddTask("Parsing bitmasks", autoStart: false, maxValue: 0);
+                var baseTypeParseTask = ctx.AddTask("Parsing base types", autoStart: false, maxValue: 0);
+                var handlesParseTask = ctx.AddTask("Parsing handles", autoStart: false, maxValue: 0);
 
                 taskTypes[parseMaster.Id] = TaskType.Number;
                 taskTypes[enumParseTask.Id] = TaskType.Number;
+                taskTypes[bitmaskParseTask.Id] = TaskType.Number;
+                taskTypes[baseTypeParseTask.Id] = TaskType.Number;
+                taskTypes[handlesParseTask.Id] = TaskType.Number;
 
                 parseMaster.StartTask();
-                var registry = ParseRegistry(xmlString, parseMaster, enumParseTask, bitmaskParseTask, baseTypeParseTask);
+                var registry = ParseRegistry(xmlString, parseMaster, enumParseTask, bitmaskParseTask, baseTypeParseTask, handlesParseTask);
 
-                var writeMaster = ctx.AddTask("[bold white]Writing definitions[/]", maxValue: 4, autoStart: false);
+                var writeMaster = ctx.AddTask("[bold white]Writing definitions[/]", maxValue: 5, autoStart: false);
                 var constsWriteTask = ctx.AddTask("Writing constants", maxValue: 1, autoStart: false);
                 var enumWriteTask = ctx.AddTask("Writing enums", maxValue: registry.Enums.Count, autoStart: false);
                 var bitmasksWriteTask = ctx.AddTask("Writing bitmasks", maxValue: registry.Bitmasks.Count, autoStart: false);
                 var baseTypesWriteTask = ctx.AddTask("Writing base types", maxValue: registry.BaseTypes.Count, autoStart: false);
+                var handlesWriteTask = ctx.AddTask("Writing handles", maxValue: registry.Handles.Count, autoStart: false);
 
                 taskTypes[writeMaster.Id] = TaskType.Number;
                 taskTypes[constsWriteTask.Id] = TaskType.Number;
                 taskTypes[enumWriteTask.Id] = TaskType.Number;
+                taskTypes[bitmasksWriteTask.Id] = TaskType.Number;
+                taskTypes[baseTypesWriteTask.Id] = TaskType.Number;
+                taskTypes[handlesWriteTask.Id] = TaskType.Number;
 
                 writeMaster.StartTask();
 
-                await WriteDefinitionsAsync(registry, version, writeMaster, constsWriteTask, enumWriteTask, bitmasksWriteTask, baseTypesWriteTask);
+                await WriteDefinitionsAsync(registry, version, writeMaster, constsWriteTask, enumWriteTask, bitmasksWriteTask, baseTypesWriteTask, handlesWriteTask);
             });
 
         await Log.CloseAndFlushAsync();
@@ -95,7 +104,8 @@ public static class Program {
         ProgressTask parseMaster,
         ProgressTask enumParseTask,
         ProgressTask bitmaskParseTask,
-        ProgressTask baseTypesParseTask
+        ProgressTask baseTypesParseTask,
+        ProgressTask handlesParseTask
     ) {
         var doc = XDocument.Parse(xmlString);
 
@@ -114,6 +124,11 @@ public static class Program {
             .Where(x => x.Attribute("category")?.Value == "basetype")
             .ToList();
 
+        var handleNodes = doc.Descendants("type")
+            .Where(x => x.Attribute("category")?.Value == "handle")
+            .Where(x => x.Attribute("alias")?.Value == null)
+            .ToList();
+
         enumParseTask.MaxValue = enumNodes.Count;
         enumParseTask.StartTask();
 
@@ -121,6 +136,7 @@ public static class Program {
         List<VulkanEnum> bitmasks = [];
         List<VulkanConstant> constants = [];
         List<VulkanBaseType> baseTypes = [];
+        List<VulkanHandle> handles = [];
 
         foreach (var enumNode in enumNodes) {
             var rawEnumName = enumNode.GetUncheckedAttributeValue("name");
@@ -234,7 +250,33 @@ public static class Program {
 
         parseMaster.Increment(1);
 
-        return new VulkanRegistry(enums, bitmasks, constants, baseTypes);
+        handlesParseTask.MaxValue = handleNodes.Count;
+        handlesParseTask.StartTask();
+
+        foreach (var def in handleNodes) {
+            var rawName = def.Element("name")?.Value;
+            if (rawName is null || string.IsNullOrEmpty(def.Value)) {
+                Log.Warning("Unable to get 'name' from handle, is it an alias?");
+
+                continue;
+            }
+
+            var name = Utilities.CleanEnumName(rawName);
+
+            var type = def.Element("type")?.Value;
+            if (type is null) {
+                Log.Warning("Unable to get 'type' element inside handle '{Name}'", name);
+            }
+
+            var dispatchable = type != "VK_DEFINE_NON_DISPATCHABLE_HANDLE";
+
+            handles.Add(new VulkanHandle(name, dispatchable));
+            handlesParseTask.Increment(1);
+        }
+
+        parseMaster.Increment(1);
+
+        return new VulkanRegistry(enums, bitmasks, constants, baseTypes, handles);
     }
 
     private static async Task WriteDefinitionsAsync(
@@ -244,7 +286,8 @@ public static class Program {
         ProgressTask constsTask,
         ProgressTask enumTask,
         ProgressTask bitmasksTask,
-        ProgressTask baseTypesTask
+        ProgressTask baseTypesTask,
+        ProgressTask handlesWriteTask
     ) {
         Directory.CreateDirectory("autogen/bitmasks");
 
@@ -255,6 +298,7 @@ public static class Program {
         await WriteEnumsAsync(registry.Enums, prologue, genCodeAttribute, enumTask, writeMaster);
         await WriteBitmasksAsync(registry.Bitmasks, prologue, genCodeAttribute, bitmasksTask, writeMaster);
         await WriteBaseTypesAsync(registry.BaseTypes, prologue, genCodeAttribute, baseTypesTask, writeMaster);
+        await WriteHandlesAsync(registry.Handles, prologue, genCodeAttribute, handlesWriteTask, writeMaster);
     }
 
     private static async Task WriteConstantsAsync(List<VulkanConstant> constants, string prologue, string genCodeAttribute, ProgressTask constsTask, ProgressTask writeMaster) {
@@ -341,6 +385,32 @@ public static class Program {
             }
 
             baseTypesTask.Increment(1);
+        }
+
+        writeMaster.Increment(1);
+    }
+
+    private static async Task WriteHandlesAsync(
+        List<VulkanHandle> handles,
+        string prologue,
+        string genCodeAttribute,
+        ProgressTask handlesWriteTask,
+        ProgressTask writeMaster
+    ) {
+        Directory.CreateDirectory("autogen/handles");
+        handlesWriteTask.StartTask();
+
+        foreach (var handle in handles) {
+            await using var file = File.Create(Path.Combine("autogen", "handles", $"{handle.Name}.cs"));
+            await using var writer = new StreamWriter(file);
+
+            var handleType = handle.Dispatchable ? "nint" : "ulong";
+
+            await writer.WriteLineAsync($"{prologue}\n\n{genCodeAttribute}\npublic readonly record struct {handle.Name}({handleType} Handle) {{");
+            await writer.WriteLineAsync($"    public static readonly {handle.Name} Null = new(0);");
+            await writer.WriteLineAsync("}");
+
+            handlesWriteTask.Increment(1);
         }
 
         writeMaster.Increment(1);
