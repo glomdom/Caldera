@@ -24,20 +24,22 @@ public static class Program {
                 taskTypes[downloadTask.Id] = TaskType.Download;
                 var xmlString = await DownloadVkXmlAsync(downloadTask);
 
-                var parseMaster = ctx.AddTask("[bold white]Parsing definitions[/]", maxValue: 2, autoStart: false);
+                var parseMaster = ctx.AddTask("[bold white]Parsing definitions[/]", maxValue: 3, autoStart: false);
                 var enumParseTask = ctx.AddTask("Parsing enums", autoStart: false);
                 var bitmaskParseTask = ctx.AddTask("Parsing bitmasks", autoStart: false);
+                var baseTypeParseTask = ctx.AddTask("Parsing base types", autoStart: false);
 
                 taskTypes[parseMaster.Id] = TaskType.Number;
                 taskTypes[enumParseTask.Id] = TaskType.Number;
 
                 parseMaster.StartTask();
-                var registry = ParseRegistry(xmlString, parseMaster, enumParseTask, bitmaskParseTask);
+                var registry = ParseRegistry(xmlString, parseMaster, enumParseTask, bitmaskParseTask, baseTypeParseTask);
 
-                var writeMaster = ctx.AddTask("[bold white]Writing definitions[/]", maxValue: 3, autoStart: false);
+                var writeMaster = ctx.AddTask("[bold white]Writing definitions[/]", maxValue: 4, autoStart: false);
                 var constsWriteTask = ctx.AddTask("Writing constants", maxValue: 1, autoStart: false);
                 var enumWriteTask = ctx.AddTask("Writing enums", maxValue: registry.Enums.Count, autoStart: false);
                 var bitmasksWriteTask = ctx.AddTask("Writing bitmasks", maxValue: registry.Bitmasks.Count, autoStart: false);
+                var baseTypesWriteTask = ctx.AddTask("Writing base types", maxValue: registry.BaseTypes.Count, autoStart: false);
 
                 taskTypes[writeMaster.Id] = TaskType.Number;
                 taskTypes[constsWriteTask.Id] = TaskType.Number;
@@ -45,7 +47,7 @@ public static class Program {
 
                 writeMaster.StartTask();
 
-                await WriteDefinitionsAsync(registry, version, writeMaster, constsWriteTask, enumWriteTask, bitmasksWriteTask);
+                await WriteDefinitionsAsync(registry, version, writeMaster, constsWriteTask, enumWriteTask, bitmasksWriteTask, baseTypesWriteTask);
             });
     }
 
@@ -78,7 +80,13 @@ public static class Program {
         return Encoding.UTF8.GetString(memoryStream.ToArray());
     }
 
-    private static VulkanRegistry ParseRegistry(string xmlString, ProgressTask parseMaster, ProgressTask enumParseTask, ProgressTask bitmaskParseTask) {
+    private static VulkanRegistry ParseRegistry(
+        string xmlString,
+        ProgressTask parseMaster,
+        ProgressTask enumParseTask,
+        ProgressTask bitmaskParseTask,
+        ProgressTask baseTypesParseTask
+    ) {
         var doc = XDocument.Parse(xmlString);
 
         var enumNodes = doc.Descendants("enums")
@@ -92,12 +100,17 @@ public static class Program {
         var apiConstantsNode = doc.Descendants("enums")
             .First(x => x.Attribute("name")?.Value == "API Constants");
 
+        var baseTypeNodes = doc.Descendants("type")
+            .Where(x => x.Attribute("category")?.Value == "basetype")
+            .ToList();
+
         enumParseTask.MaxValue = enumNodes.Count;
         enumParseTask.StartTask();
 
         List<VulkanEnum> enums = [];
         List<VulkanEnum> bitmasks = [];
         List<VulkanConstant> constants = [];
+        List<VulkanBaseType> baseTypes = [];
 
         foreach (var enumNode in enumNodes) {
             var rawEnumName = enumNode.GetUncheckedAttributeValue("name");
@@ -174,7 +187,22 @@ public static class Program {
 
         parseMaster.Increment(1);
 
-        return new VulkanRegistry(enums, bitmasks, constants);
+        baseTypesParseTask.MaxValue = baseTypeNodes.Count;
+        baseTypesParseTask.StartTask();
+
+        foreach (var def in baseTypeNodes) {
+            var rawMemberName = def.Element("name")?.Value;
+            if (rawMemberName is null) continue;
+
+            var memberName = Utilities.CleanEnumName(rawMemberName);
+            baseTypes.Add(new VulkanBaseType("nint", memberName));
+
+            baseTypesParseTask.Increment(1);
+        }
+
+        parseMaster.Increment(1);
+
+        return new VulkanRegistry(enums, bitmasks, constants, baseTypes);
     }
 
     private static async Task WriteDefinitionsAsync(
@@ -183,7 +211,8 @@ public static class Program {
         ProgressTask writeMaster,
         ProgressTask constsTask,
         ProgressTask enumTask,
-        ProgressTask bitmasksTask
+        ProgressTask bitmasksTask,
+        ProgressTask baseTypesTask
     ) {
         Directory.CreateDirectory("autogen/bitmasks");
 
@@ -193,6 +222,7 @@ public static class Program {
         await WriteConstantsAsync(registry.Constants, prologue, genCodeAttribute, constsTask, writeMaster);
         await WriteEnumsAsync(registry.Enums, prologue, genCodeAttribute, enumTask, writeMaster);
         await WriteBitmasksAsync(registry.Bitmasks, prologue, genCodeAttribute, bitmasksTask, writeMaster);
+        await WriteBaseTypesAsync(registry.BaseTypes, prologue, genCodeAttribute, baseTypesTask, writeMaster);
     }
 
     private static async Task WriteConstantsAsync(List<VulkanConstant> constants, string prologue, string genCodeAttribute, ProgressTask constsTask, ProgressTask writeMaster) {
@@ -249,6 +279,29 @@ public static class Program {
 
             await writer.WriteLineAsync("}");
             bitmasksTask.Increment(1);
+        }
+
+        writeMaster.Increment(1);
+    }
+
+    private static async Task WriteBaseTypesAsync(
+        List<VulkanBaseType> baseTypes,
+        string prologue,
+        string genCodeAttribute,
+        ProgressTask baseTypesTask,
+        ProgressTask writeMaster
+    ) {
+        Directory.CreateDirectory("autogen/basetypes");
+        baseTypesTask.StartTask();
+
+        foreach (var type in baseTypes) {
+            await using var file = File.Create(Path.Combine("autogen", "basetypes", $"{type.Name}.cs"));
+            await using var writer = new StreamWriter(file);
+
+            await writer.WriteLineAsync($"{prologue}\n\n{genCodeAttribute}\npublic readonly record struct {type.Name} {{");
+            await writer.WriteLineAsync("}");
+
+            baseTypesTask.Increment(1);
         }
 
         writeMaster.Increment(1);
