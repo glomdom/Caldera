@@ -18,7 +18,7 @@ public static class Program {
                                     \___|/_/ \_\ |____||___/ |___||_|_\  /_/ \_\  
                                   """;
 
-    public static async Task Main(string[] args) {
+    public static async Task Main() {
         var version = GetAssemblyVersion();
         PrintBanner();
 
