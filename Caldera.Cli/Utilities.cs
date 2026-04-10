@@ -1,4 +1,7 @@
-﻿namespace Caldera.Cli;
+﻿using System.Reflection;
+using Spectre.Console;
+
+namespace Caldera.Cli;
 
 public static class Utilities {
     public static string GetPrologueString(string version) {
@@ -16,6 +19,20 @@ public static class Utilities {
                 """;
     }
 
+    public static void PrintBanner() {
+        var lines = Constants.Banner.Split('\n');
+        for (var i = 0; i < lines.Length; i++) {
+            var ratio = lines.Length > 1 ? (double)i / (lines.Length - 1) : 0;
+            var r = (byte)(255 - (255 - 180) * ratio);
+            var g = (byte)(165 - (165 - 50) * ratio);
+
+            AnsiConsole.MarkupLine($"[rgb({r},{g},0)]{lines[i]}[/]");
+        }
+
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine("[gray70]A C# Vulkan bindings forge.[/]");
+    }
+
     public static string CleanEnumName(string raw) => raw.StartsWith("Vk") ? raw[2..] : raw;
     public static string CleanEnumValue(string raw) => raw.StartsWith("VK_") ? raw[3..] : raw;
     public static string NormalizeValue(string raw) => raw.Replace("LL", "L");
@@ -27,4 +44,11 @@ public static class Utilities {
 
         _ => throw new ArgumentOutOfRangeException(nameof(xmlType), xmlType, $"Unrecognized type '{xmlType}'."),
     };
+
+    public static string GetAssemblyVersion() {
+        return Assembly.GetEntryAssembly()
+                   ?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+                   ?.InformationalVersion ??
+               throw new InvalidOperationException("Failed to get entry assembly version.");
+    }
 }

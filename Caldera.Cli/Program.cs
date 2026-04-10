@@ -1,5 +1,4 @@
-﻿using System.Reflection;
-using System.Text;
+﻿using System.Text;
 using System.Xml.Linq;
 using Caldera.Cli.Models;
 using Spectre.Console;
@@ -7,20 +6,9 @@ using Spectre.Console;
 namespace Caldera.Cli;
 
 public static class Program {
-    private const string Banner = """
-                                                  (    (           (              
-                                     (     (      )\ ) )\ )        )\ )    (      
-                                     )\    )\    (()/((()/(   (   (()/(    )\     
-                                   (((_)((((_)(   /(_))/(_))  )\   /(_))((((_)(   
-                                   )\___ )\ _ )\ (_)) (_))_  ((_) (_))   )\ _ )\  
-                                  ((/ __|(_)_\(_)| |   |   \ | __|| _ \  (_)_\(_) 
-                                   | (__  / _ \  | |__ | |) || _| |   /   / _ \   
-                                    \___|/_/ \_\ |____||___/ |___||_|_\  /_/ \_\  
-                                  """;
-
     public static async Task Main() {
-        var version = GetAssemblyVersion();
-        PrintBanner();
+        var version = Utilities.GetAssemblyVersion();
+        Utilities.PrintBanner();
 
         var taskTypes = new Dictionary<int, TaskType>();
 
@@ -264,26 +252,5 @@ public static class Program {
         }
 
         writeMaster.Increment(1);
-    }
-
-    private static string GetAssemblyVersion() {
-        return Assembly.GetEntryAssembly()
-                   ?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()
-                   ?.InformationalVersion ??
-               throw new InvalidOperationException("Failed to get entry assembly version.");
-    }
-
-    private static void PrintBanner() {
-        var lines = Banner.Split('\n');
-        for (var i = 0; i < lines.Length; i++) {
-            var ratio = lines.Length > 1 ? (double)i / (lines.Length - 1) : 0;
-            var r = (byte)(255 - (255 - 180) * ratio);
-            var g = (byte)(165 - (165 - 50) * ratio);
-
-            AnsiConsole.MarkupLine($"[rgb({r},{g},0)]{lines[i]}[/]");
-        }
-
-        AnsiConsole.WriteLine();
-        AnsiConsole.MarkupLine("[gray70]A C# Vulkan bindings forge.[/]");
     }
 }
