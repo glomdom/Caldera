@@ -1,112 +1,53 @@
 ﻿using System.Text;
 using System.Xml.Linq;
-using Caldera.Cli.Columns;
+using Caldera.Cli.Extensions;
 using Caldera.Cli.Models;
 using Serilog;
-using Spectre.Console;
 
 namespace Caldera.Cli;
 
 public static class Program {
     private static readonly Dictionary<string, string> BaseTypeLookup = [];
+    private static readonly Dictionary<string, VulkanFunctionPointer> FunctionPointerLookup = [];
+    private static readonly HttpClient Client = new();
 
     public static async Task Main() {
         Log.Logger = new LoggerConfiguration()
             .MinimumLevel.Verbose()
-            .WriteTo.Async(x => x.File("logs/caldera.log", rollingInterval: RollingInterval.Day))
+            .WriteTo.Console()
             .CreateLogger();
 
         var version = Utilities.GetAssemblyVersion();
+
         Utilities.PrintBanner();
 
-        var taskTypes = new Dictionary<int, TaskType>();
+        Log.Information("Downloading vk.xml");
+        var xmlString = await DownloadVkXmlAsync();
 
-        await AnsiConsole.Progress()
-            .Columns(
-                new TaskDescriptionColumn(),
-                new ProgressBarColumn(),
-                new MetricsColumn(taskTypes),
-                new SpinnerColumn())
-            .StartAsync(async ctx => {
-                var downloadTask = ctx.AddTask("Downloading [yellow]vk.xml[/]");
-                taskTypes[downloadTask.Id] = TaskType.Download;
+        Log.Information("Parsing definitions from vk.xml");
+        var registry = ParseRegistry(xmlString);
 
-                var xmlString = await DownloadVkXmlAsync(downloadTask);
+        Log.Information("Writing C# definitions");
+        await WriteDefinitionsAsync(registry, version);
 
-                var parseMaster = ctx.AddTask("[bold white]Parsing definitions[/]", maxValue: 4, autoStart: false);
-                var enumParseTask = ctx.AddTask("Parsing enums", autoStart: false, maxValue: 0);
-                var bitmaskParseTask = ctx.AddTask("Parsing bitmasks", autoStart: false, maxValue: 0);
-                var baseTypeParseTask = ctx.AddTask("Parsing base types", autoStart: false, maxValue: 0);
-                var handlesParseTask = ctx.AddTask("Parsing handles", autoStart: false, maxValue: 0);
-
-                taskTypes[parseMaster.Id] = TaskType.Number;
-                taskTypes[enumParseTask.Id] = TaskType.Number;
-                taskTypes[bitmaskParseTask.Id] = TaskType.Number;
-                taskTypes[baseTypeParseTask.Id] = TaskType.Number;
-                taskTypes[handlesParseTask.Id] = TaskType.Number;
-
-                parseMaster.StartTask();
-                var registry = ParseRegistry(xmlString, parseMaster, enumParseTask, bitmaskParseTask, baseTypeParseTask, handlesParseTask);
-
-                var writeMaster = ctx.AddTask("[bold white]Writing definitions[/]", maxValue: 5, autoStart: false);
-                var constsWriteTask = ctx.AddTask("Writing constants", maxValue: 1, autoStart: false);
-                var enumWriteTask = ctx.AddTask("Writing enums", maxValue: registry.Enums.Count, autoStart: false);
-                var bitmasksWriteTask = ctx.AddTask("Writing bitmasks", maxValue: registry.Bitmasks.Count, autoStart: false);
-                var baseTypesWriteTask = ctx.AddTask("Writing base types", maxValue: registry.BaseTypes.Count, autoStart: false);
-                var handlesWriteTask = ctx.AddTask("Writing handles", maxValue: registry.Handles.Count, autoStart: false);
-
-                taskTypes[writeMaster.Id] = TaskType.Number;
-                taskTypes[constsWriteTask.Id] = TaskType.Number;
-                taskTypes[enumWriteTask.Id] = TaskType.Number;
-                taskTypes[bitmasksWriteTask.Id] = TaskType.Number;
-                taskTypes[baseTypesWriteTask.Id] = TaskType.Number;
-                taskTypes[handlesWriteTask.Id] = TaskType.Number;
-
-                writeMaster.StartTask();
-
-                await WriteDefinitionsAsync(registry, version, writeMaster, constsWriteTask, enumWriteTask, bitmasksWriteTask, baseTypesWriteTask, handlesWriteTask);
-            });
+        Log.Information("Generated files can be found in {Location}", Path.Combine(Directory.GetCurrentDirectory(), "autogen"));
 
         await Log.CloseAndFlushAsync();
     }
 
-    private static async Task<string> DownloadVkXmlAsync(ProgressTask downloadTask) {
-        using var client = new HttpClient();
-        using var response = await client.GetAsync(
+    private static async Task<string> DownloadVkXmlAsync() {
+        using var response = await Client.GetAsync(
             "https://raw.githubusercontent.com/KhronosGroup/Vulkan-Docs/main/xml/vk.xml",
             HttpCompletionOption.ResponseHeadersRead
         );
 
         response.EnsureSuccessStatusCode();
+        var bytes = await response.Content.ReadAsByteArrayAsync();
 
-        var totalBytes = response.Content.Headers.ContentLength;
-        if (totalBytes.HasValue) {
-            downloadTask.MaxValue = totalBytes.Value;
-        } else {
-            downloadTask.IsIndeterminate = true;
-        }
-
-        await using var stream = await response.Content.ReadAsStreamAsync();
-        using var memoryStream = new MemoryStream();
-        var buffer = new byte[8192];
-
-        int bytesRead;
-        while ((bytesRead = await stream.ReadAsync(buffer)) > 0) {
-            await memoryStream.WriteAsync(buffer.AsMemory(0, bytesRead));
-            if (totalBytes.HasValue) downloadTask.Increment(bytesRead);
-        }
-
-        return Encoding.UTF8.GetString(memoryStream.ToArray());
+        return Encoding.UTF8.GetString(bytes);
     }
 
-    private static VulkanRegistry ParseRegistry(
-        string xmlString,
-        ProgressTask parseMaster,
-        ProgressTask enumParseTask,
-        ProgressTask bitmaskParseTask,
-        ProgressTask baseTypesParseTask,
-        ProgressTask handlesParseTask
-    ) {
+    private static VulkanRegistry ParseRegistry(string xmlString) {
         var doc = XDocument.Parse(xmlString);
 
         var enumNodes = doc.Descendants("enums")
@@ -129,14 +70,16 @@ public static class Program {
             .Where(x => x.Attribute("alias")?.Value == null)
             .ToList();
 
-        enumParseTask.MaxValue = enumNodes.Count;
-        enumParseTask.StartTask();
+        var funcPointerNodes = doc.Descendants("type")
+            .Where(x => x.Attribute("category")?.Value == "funcpointer")
+            .ToList();
 
         List<VulkanEnum> enums = [];
         List<VulkanEnum> bitmasks = [];
         List<VulkanConstant> constants = [];
         List<VulkanBaseType> baseTypes = [];
         List<VulkanHandle> handles = [];
+        List<VulkanFunctionPointer> functionPointers = [];
 
         foreach (var enumNode in enumNodes) {
             var rawEnumName = enumNode.GetUncheckedAttributeValue("name");
@@ -164,11 +107,9 @@ public static class Program {
             }
 
             enums.Add(new VulkanEnum(cleanEnumName, false, underlyingType, values));
-            enumParseTask.Increment(1);
         }
 
-        bitmaskParseTask.MaxValue = bitmaskNodes.Count;
-        bitmaskParseTask.StartTask();
+        Log.Information("Parsed {Count} enums, of which {ToGenerateCount} will be generated", enumNodes.Count, enums.Count);
 
         foreach (var bitmaskNode in bitmaskNodes) {
             var rawEnumName = bitmaskNode.GetUncheckedAttributeValue("name");
@@ -198,10 +139,11 @@ public static class Program {
             }
 
             bitmasks.Add(new VulkanEnum(cleanEnumName, true, underlyingType, values));
-            bitmaskParseTask.Increment(1);
+
+            Log.Debug("Parsed bitmask {BitmaskName} of type {UnderlyingType} with {MemberCount} members", cleanEnumName, underlyingType, values.Count);
         }
 
-        parseMaster.Increment(1);
+        Log.Information("Parsed {Count} bitmasks, of which {ToGenerateCount} will be generated", bitmaskNodes.Count, bitmasks.Count);
 
         foreach (var def in apiConstantsNode.Elements("enum")) {
             var memberName = def.GetCheckedAttributeValue("name");
@@ -211,10 +153,7 @@ public static class Program {
             constants.Add(new VulkanConstant(Utilities.CleanEnumValue(memberName), memberType, value));
         }
 
-        parseMaster.Increment(1);
-
-        baseTypesParseTask.MaxValue = baseTypeNodes.Count;
-        baseTypesParseTask.StartTask();
+        Log.Information("Parsed API constants");
 
         foreach (var def in baseTypeNodes) {
             var rawMemberName = def.Element("name")?.Value;
@@ -244,25 +183,26 @@ public static class Program {
                 Log.Warning("Unable to parse type for {Name}, falling back to nint", memberName);
             }
 
+            if (primitive) {
+                BaseTypeLookup[memberName] = type;
+                Log.Debug("Populated lookup table with {Normal} -> {Lookup}", memberName, type);
+            }
+
             baseTypes.Add(new VulkanBaseType(type, memberName, opaque, primitive));
-            baseTypesParseTask.Increment(1);
+
+            Log.Debug("Parsed base type {BaseTypeName} of type {Type}, primitive={Primitive} | opaque={Opaque}", memberName, type, primitive, opaque);
         }
 
-        parseMaster.Increment(1);
-
-        handlesParseTask.MaxValue = handleNodes.Count;
-        handlesParseTask.StartTask();
+        Log.Information("Parsed {Count} base types, of which {ToGenerateCount} will be generated", baseTypeNodes.Count, baseTypes.Count);
 
         foreach (var def in handleNodes) {
             var rawName = def.Element("name")?.Value;
             if (rawName is null || string.IsNullOrEmpty(def.Value)) {
                 Log.Warning("Unable to get 'name' from handle, is it an alias?");
-
                 continue;
             }
 
             var name = Utilities.CleanEnumName(rawName);
-
             var type = def.Element("type")?.Value;
             if (type is null) {
                 Log.Warning("Unable to get 'type' element inside handle '{Name}'", name);
@@ -271,58 +211,68 @@ public static class Program {
             var dispatchable = type != "VK_DEFINE_NON_DISPATCHABLE_HANDLE";
 
             handles.Add(new VulkanHandle(name, dispatchable));
-            handlesParseTask.Increment(1);
+
+            Log.Debug("Parsed handle {HandleName} of type {Type}, dispatchable={Dispatchable}", name, type, dispatchable);
         }
 
-        parseMaster.Increment(1);
+        Log.Information("Parsed {Count} handles, of which {ToGenerateCount} will be generated", handleNodes.Count, handles.Count);
+
+        foreach (var funcPointer in funcPointerNodes) {
+            var proto = funcPointer.GetElement("proto");
+            var returnTypeStr = proto.GetElementValue("type").CleanName();
+            var name = proto.GetElementValue("name").CleanFunctionPointerName();
+
+            var type = new VulkanType(returnTypeStr, proto.Value, BaseTypeLookup);
+
+            FunctionPointerLookup[name] = new VulkanFunctionPointer(type, name, []);
+
+            Log.Debug("Parsed function pointer {Name} with return type {ReturnType}", name, type);
+        }
+
+        Log.Information("Parsed {Count} function pointers", funcPointerNodes.Count, functionPointers.Count);
 
         return new VulkanRegistry(enums, bitmasks, constants, baseTypes, handles);
     }
 
-    private static async Task WriteDefinitionsAsync(
-        VulkanRegistry registry,
-        string version,
-        ProgressTask writeMaster,
-        ProgressTask constsTask,
-        ProgressTask enumTask,
-        ProgressTask bitmasksTask,
-        ProgressTask baseTypesTask,
-        ProgressTask handlesWriteTask
-    ) {
+    private static async Task WriteDefinitionsAsync(VulkanRegistry registry, string version) {
         Directory.CreateDirectory("autogen/bitmasks");
 
         var prologue = Utilities.GetPrologueString(version);
         var genCodeAttribute = $"[GeneratedCode(\"Caldera\", \"{version}\")]";
 
-        await WriteConstantsAsync(registry.Constants, prologue, genCodeAttribute, constsTask, writeMaster);
-        await WriteEnumsAsync(registry.Enums, prologue, genCodeAttribute, enumTask, writeMaster);
-        await WriteBitmasksAsync(registry.Bitmasks, prologue, genCodeAttribute, bitmasksTask, writeMaster);
-        await WriteBaseTypesAsync(registry.BaseTypes, prologue, genCodeAttribute, baseTypesTask, writeMaster);
-        await WriteHandlesAsync(registry.Handles, prologue, genCodeAttribute, handlesWriteTask, writeMaster);
+        await WriteConstantsAsync(registry.Constants, prologue, genCodeAttribute);
+        Log.Information("Wrote API Constants");
+
+        await WriteEnumsAsync(registry.Enums, prologue, genCodeAttribute);
+        Log.Information("Wrote {Count} enums", registry.Enums.Count);
+
+        await WriteBitmasksAsync(registry.Bitmasks, prologue, genCodeAttribute);
+        Log.Information("Wrote {Count} bitmasks", registry.Bitmasks.Count);
+
+        await WriteBaseTypesAsync(registry.BaseTypes, prologue, genCodeAttribute);
+        Log.Information("Wrote {Count} base types", registry.BaseTypes.Count);
+
+        await WriteHandlesAsync(registry.Handles, prologue, genCodeAttribute);
+        Log.Information("Wrote {Count} handles", registry.Handles.Count);
     }
 
-    private static async Task WriteConstantsAsync(List<VulkanConstant> constants, string prologue, string genCodeAttribute, ProgressTask constsTask, ProgressTask writeMaster) {
+    private static async Task WriteConstantsAsync(List<VulkanConstant> constants, string prologue, string genCodeAttribute) {
         Directory.CreateDirectory("autogen/constants");
-        constsTask.StartTask();
 
-        await using (var file = File.Create(Path.Combine("autogen", "constants", "Constants.cs")))
-        await using (var writer = new StreamWriter(file)) {
-            await writer.WriteLineAsync($"{prologue}\n\n{genCodeAttribute}\npublic static class Constants {{");
+        await using var file = File.Create(Path.Combine("autogen", "constants", "Constants.cs"));
+        await using var writer = new StreamWriter(file);
 
-            foreach (var constant in constants) {
-                await writer.WriteLineAsync($"    public const {constant.Type} {constant.Name} = {constant.Value};");
-            }
+        await writer.WriteLineAsync($"{prologue}\n\n{genCodeAttribute}\npublic static class Constants {{");
 
-            await writer.WriteLineAsync("}");
+        foreach (var constant in constants) {
+            await writer.WriteLineAsync($"    public const {constant.Type} {constant.Name} = {constant.Value};");
         }
 
-        constsTask.Increment(1);
-        writeMaster.Increment(1);
+        await writer.WriteLineAsync("}");
     }
 
-    private static async Task WriteEnumsAsync(List<VulkanEnum> enums, string prologue, string genCodeAttribute, ProgressTask enumTask, ProgressTask writeMaster) {
+    private static async Task WriteEnumsAsync(List<VulkanEnum> enums, string prologue, string genCodeAttribute) {
         Directory.CreateDirectory("autogen/enums");
-        enumTask.StartTask();
 
         foreach (var def in enums) {
             await using var file = File.Create(Path.Combine("autogen", "enums", $"{def.Name}.cs"));
@@ -334,15 +284,11 @@ public static class Program {
             }
 
             await writer.WriteLineAsync("}");
-            enumTask.Increment(1);
         }
-
-        writeMaster.Increment(1);
     }
 
-    private static async Task WriteBitmasksAsync(List<VulkanEnum> bitmasks, string prologue, string genCodeAttribute, ProgressTask bitmasksTask, ProgressTask writeMaster) {
+    private static async Task WriteBitmasksAsync(List<VulkanEnum> bitmasks, string prologue, string genCodeAttribute) {
         Directory.CreateDirectory("autogen/bitmasks");
-        bitmasksTask.StartTask();
 
         foreach (var vulkanBitmask in bitmasks) {
             await using var file = File.Create(Path.Combine("autogen", "bitmasks", $"{vulkanBitmask.Name}.cs"));
@@ -354,51 +300,24 @@ public static class Program {
             }
 
             await writer.WriteLineAsync("}");
-            bitmasksTask.Increment(1);
         }
-
-        writeMaster.Increment(1);
     }
 
-    private static async Task WriteBaseTypesAsync(
-        List<VulkanBaseType> baseTypes,
-        string prologue,
-        string genCodeAttribute,
-        ProgressTask baseTypesTask,
-        ProgressTask writeMaster
-    ) {
+    private static async Task WriteBaseTypesAsync(List<VulkanBaseType> baseTypes, string prologue, string genCodeAttribute) {
         Directory.CreateDirectory("autogen/basetypes");
-        baseTypesTask.StartTask();
 
-        foreach (var type in baseTypes) {
-            if (type.IsOpaque) {
-                await using var file = File.Create(Path.Combine("autogen", "basetypes", $"{type.Name}.cs"));
-                await using var writer = new StreamWriter(file);
+        foreach (var type in baseTypes.Where(type => type.IsOpaque)) {
+            await using var file = File.Create(Path.Combine("autogen", "basetypes", $"{type.Name}.cs"));
+            await using var writer = new StreamWriter(file);
 
-                await writer.WriteLineAsync($"{prologue}\n\n{genCodeAttribute}\npublic readonly record struct {type.Name}(nint Handle) {{");
-                await writer.WriteLineAsync($"    public static readonly {type.Name} Null = new(0);");
-                await writer.WriteLineAsync("}");
-            } else if (type.IsPrimitive) {
-                BaseTypeLookup[type.Name] = type.Type;
-
-                Log.Debug("Populated lookup table with {Normal} -> {Lookup}", type.Name, type.Type);
-            }
-
-            baseTypesTask.Increment(1);
+            await writer.WriteLineAsync($"{prologue}\n\n{genCodeAttribute}\npublic readonly record struct {type.Name}(nint Handle) {{");
+            await writer.WriteLineAsync($"    public static readonly {type.Name} Null = new(0);");
+            await writer.WriteLineAsync("}");
         }
-
-        writeMaster.Increment(1);
     }
 
-    private static async Task WriteHandlesAsync(
-        List<VulkanHandle> handles,
-        string prologue,
-        string genCodeAttribute,
-        ProgressTask handlesWriteTask,
-        ProgressTask writeMaster
-    ) {
+    private static async Task WriteHandlesAsync(List<VulkanHandle> handles, string prologue, string genCodeAttribute) {
         Directory.CreateDirectory("autogen/handles");
-        handlesWriteTask.StartTask();
 
         foreach (var handle in handles) {
             await using var file = File.Create(Path.Combine("autogen", "handles", $"{handle.Name}.cs"));
@@ -409,10 +328,6 @@ public static class Program {
             await writer.WriteLineAsync($"{prologue}\n\n{genCodeAttribute}\npublic readonly record struct {handle.Name}({handleType} Handle) {{");
             await writer.WriteLineAsync($"    public static readonly {handle.Name} Null = new(0);");
             await writer.WriteLineAsync("}");
-
-            handlesWriteTask.Increment(1);
         }
-
-        writeMaster.Increment(1);
     }
 }

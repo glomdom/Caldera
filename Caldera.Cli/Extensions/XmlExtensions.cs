@@ -1,6 +1,6 @@
 ﻿using System.Xml.Linq;
 
-namespace Caldera.Cli;
+namespace Caldera.Cli.Extensions;
 
 public static class XmlExtensions {
     extension(XElement elem) {
@@ -16,6 +16,14 @@ public static class XmlExtensions {
 
         public string? MaybeGetAttributeValue(string attr) {
             return elem.Attribute(attr)?.Value;
+        }
+
+        public XElement GetElement(string name) {
+            return elem.Element(name) ?? throw new InvalidDataException($"Element '{elem.Name}' is missing element '{name}'");
+        }
+
+        public string GetElementValue(string name) {
+            return elem.GetElement(name).Value;
         }
     }
 }

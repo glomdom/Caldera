@@ -31,6 +31,7 @@ public static class Utilities {
 
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine("[gray70]A C# Vulkan bindings forge.[/]");
+        AnsiConsole.WriteLine();
     }
 
     public static string CleanEnumName(string raw) => raw.StartsWith("Vk") ? raw[2..] : raw;
