@@ -229,7 +229,7 @@ public static class Program {
             Log.Debug("Parsed function pointer {Name} with return type {ReturnType}", name, type);
         }
 
-        Log.Information("Parsed {Count} function pointers", funcPointerNodes.Count, functionPointers.Count);
+        Log.Information("Parsed {Count} function pointers", funcPointerNodes.Count);
 
         return new VulkanRegistry(enums, bitmasks, constants, baseTypes, handles);
     }
