@@ -14,6 +14,7 @@ public static class Utilities {
                 // </auto-generated>
 
                 using System.CodeDom.Compiler;
+                using System.Runtime.InteropServices;
 
                 namespace Caldera;
                 """;
@@ -39,12 +40,15 @@ public static class Utilities {
     public static string NormalizeValue(string raw) => raw.Replace("LL", "L");
 
     public static string GetTypeFromXml(string xmlType) => xmlType switch {
+        "int32_t" => "int",
+        "uint8_t" => "byte",
         "uint32_t" => "uint",
         "uint64_t" => "ulong",
+        "size_t" => "nuint",
         "float" => "float",
         "void" => "void",
 
-        _ => throw new ArgumentOutOfRangeException(nameof(xmlType), xmlType, $"Unrecognized type '{xmlType}'."),
+        _ => xmlType,
     };
 
     public static string GetAssemblyVersion() {

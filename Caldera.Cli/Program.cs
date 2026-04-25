@@ -56,8 +56,9 @@ public static class Program {
         var baseTypes = ParseBaseTypes(doc);
         var handles = ParseHandles(doc);
         ParseFunctionPointers(doc);
+        var structs = ParseStructs(doc);
 
-        return new VulkanRegistry(enums, bitmasks, constants, baseTypes, handles);
+        return new VulkanRegistry(enums, bitmasks, constants, baseTypes, handles, structs);
     }
 
     private static List<VulkanEnum> ParseEnums(XDocument doc) {
@@ -77,7 +78,7 @@ public static class Program {
             List<VulkanEnumValue> values = [];
 
             foreach (var enumDef in enumNode.Elements("enum")) {
-                var memberName = enumDef.GetCheckedAttributeValue("name");
+                var memberName = enumDef.GetAttributeValue("name");
                 var cleanMemberName = Utilities.CleanEnumValue(memberName);
 
                 var exactValue = enumDef.Attribute("value")?.Value;
@@ -107,9 +108,13 @@ public static class Program {
             .Where(x => x.Attribute("name")?.Value != "API Constants" && x.Attribute("type")?.Value == "bitmask")
             .ToList();
 
+        var mapping = ParseBitmaskTypeMapping(doc);
+
         foreach (var bitmaskNode in bitmaskNodes) {
             var rawEnumName = bitmaskNode.GetUncheckedAttributeValue("name");
-            var cleanEnumName = Utilities.CleanEnumName(rawEnumName);
+            var rawFlagsName = mapping.GetValueOrDefault(rawEnumName, rawEnumName);
+
+            var cleanEnumName = Utilities.CleanEnumName(rawFlagsName);
             var bitwidth = bitmaskNode.MaybeGetAttributeValue("bitwidth");
 
             var underlyingType = bitwidth == "64" ? "ulong" : "uint";
@@ -117,7 +122,7 @@ public static class Program {
             List<VulkanEnumValue> values = [];
 
             foreach (var enumDef in bitmaskNode.Elements("enum")) {
-                var memberName = enumDef.GetCheckedAttributeValue("name");
+                var memberName = enumDef.GetAttributeValue("name");
                 var cleanMemberName = Utilities.CleanEnumValue(memberName);
 
                 var exactValue = enumDef.Attribute("value")?.Value;
@@ -151,7 +156,7 @@ public static class Program {
             .First(x => x.Attribute("name")?.Value == "API Constants");
 
         foreach (var def in apiConstantsNode.Elements("enum")) {
-            var memberName = def.GetCheckedAttributeValue("name");
+            var memberName = def.GetAttributeValue("name");
             var memberType = Utilities.GetTypeFromXml(def.GetUncheckedAttributeValue("type"));
             var value = Utilities.NormalizeValue(def.GetUncheckedAttributeValue("value"));
 
@@ -262,7 +267,7 @@ public static class Program {
             List<VulkanFunctionParameter> paramTypes = [];
             foreach (var param in paramNodes) {
                 var paramName = param.GetElementValue("name").CleanName();
-                var paramType = param.GetElementValue("type").CleanName();
+                var paramType = Utilities.GetTypeFromXml(param.GetElementValue("type").CleanName());
 
                 paramTypes.Add(new VulkanFunctionParameter(new VulkanType(paramType, param.Value, BaseTypeLookup), paramName));
             }
@@ -273,6 +278,76 @@ public static class Program {
         }
 
         Log.Information("Parsed {Count} function pointers", funcPointerNodes.Count);
+    }
+
+    // <type category="struct" name="VkBaseOutStructure">
+    // <member><type>VkStructureType</type> <name>sType</name></member>
+    // <member optional="true">struct <type>VkBaseOutStructure</type>* <name>pNext</name></member>
+    // </type>
+    // <type category="struct" name="VkBaseInStructure">
+    // <member><type>VkStructureType</type> <name>sType</name></member>
+    // <member optional="true">const struct <type>VkBaseInStructure</type>* <name>pNext</name></member>
+    // </type>
+    // <type category="struct" name="VkOffset2D"> OK
+    // <member><type>int32_t</type>        <name>x</name></member>
+    // <member><type>int32_t</type>        <name>y</name></member>
+    // </type>
+    // <type category="struct" name="VkOffset3D">
+    // <member><type>int32_t</type>        <name>x</name></member>
+    // <member><type>int32_t</type>        <name>y</name></member>
+    // <member><type>int32_t</type>        <name>z</name></member>
+    // </type>
+
+    // TODO: parse optional properly, true/false does not change abi.
+    //       optional="true,false" - pointer must be provided, elements can be null
+    //       optional="false,true" - pointer can be null, if provided all elements must be valid
+    private static List<VulkanStruct> ParseStructs(XDocument doc) {
+        List<VulkanStruct> structs = [];
+
+        var structNodes = doc.Descendants("type")
+            .Where(x => x.Attribute("category")?.Value == "struct")
+            .ToList();
+
+        var counter = 0;
+        foreach (var structNode in structNodes) {
+            var name = structNode.GetUncheckedAttributeValue("name").CleanName();
+
+            List<VulkanStructMember> members = [];
+            foreach (var member in structNode.Elements("member")) {
+                var memberName = member.GetElementValue("name").CleanName();
+                var memberRawType = Utilities.GetTypeFromXml(member.GetElementValue("type").CleanName().CleanFunctionPointerName());
+                if (FunctionPointerLookup.TryGetValue(memberRawType, out var fp)) {
+                    var memberType = new VulkanType(fp.Name, member.Value, FunctionPointerLookup);
+                    members.Add(new VulkanStructMember(memberType, memberName));
+                } else {
+                    var memberType = new VulkanType(memberRawType.CleanName(), member.Value, BaseTypeLookup);
+                    members.Add(new VulkanStructMember(memberType, memberName));
+                }
+            }
+
+            var hasPointers = members.Any(x => x.Type.IsPointer);
+            structs.Add(new VulkanStruct(name, members, hasPointers));
+
+            counter++;
+
+            if (counter == 25) {
+                break;
+            }
+        }
+
+        Log.Information("Parsed {Count} structs of which {ToGenerateCount} will be generated", structNodes.Count, structs.Count);
+
+        return structs;
+    }
+
+    private static Dictionary<string, string> ParseBitmaskTypeMapping(XDocument doc) {
+        return doc.Descendants("type")
+            .Where(x => x.Attribute("category")?.Value == "bitmask")
+            .Where(x => x.Attribute("requires") != null)
+            .ToDictionary(
+                x => x.Attribute("requires")!.Value,
+                x => x.Element("name")!.Value
+            );
     }
 
     private static async Task WriteDefinitionsAsync(VulkanRegistry registry, string version) {
@@ -295,6 +370,30 @@ public static class Program {
 
         await WriteHandlesAsync(registry.Handles, prologue, genCodeAttribute);
         Log.Information("Wrote {Count} handles", registry.Handles.Count);
+
+        await WriteStructsAsync(registry.Structs, prologue, genCodeAttribute);
+        Log.Information("Wrote {Count} structs", registry.Structs.Count);
+    }
+
+    private static async Task WriteStructsAsync(List<VulkanStruct> structs, string prologue, string genCodeAttribute) {
+        Directory.CreateDirectory("autogen/structs");
+
+        foreach (var def in structs) {
+            await using var file = File.Create(Path.Combine("autogen", "structs", $"{def.Name}.cs"));
+            await using var writer = new StreamWriter(file);
+
+            var structDefinition = "struct";
+            if (def.HasPointers) {
+                structDefinition = "unsafe struct";
+            }
+
+            await writer.WriteLineAsync($"{prologue}\n\n{genCodeAttribute}\n[StructLayout(LayoutKind.Sequential)]\npublic {structDefinition} {def.Name} {{");
+            foreach (var value in def.Members) {
+                await writer.WriteLineAsync($"    public {value.Type} {value.Name};");
+            }
+
+            await writer.WriteLineAsync("}");
+        }
     }
 
     private static async Task WriteConstantsAsync(List<VulkanConstant> constants, string prologue, string genCodeAttribute) {

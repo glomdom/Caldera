@@ -8,7 +8,7 @@ public static class XmlExtensions {
             return elem.Attribute(attr)!.Value;
         }
 
-        public string GetCheckedAttributeValue(string attr) {
+        public string GetAttributeValue(string attr) {
             var result = elem.Attribute(attr)?.Value;
 
             return result ?? throw new InvalidDataException($"Element '{elem.Name}' does not have attribute '{attr}'");
