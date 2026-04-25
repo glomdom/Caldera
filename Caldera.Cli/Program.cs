@@ -50,31 +50,12 @@ public static class Program {
     private static VulkanRegistry ParseRegistry(string xmlString) {
         var doc = XDocument.Parse(xmlString);
 
-        var funcPointerNodes = doc.Descendants("type")
-            .Where(x => x.Attribute("category")?.Value == "funcpointer")
-            .ToList();
-
-        List<VulkanFunctionPointer> functionPointers = [];
-
         var enums = ParseEnums(doc);
         var bitmasks = ParseBitmasks(doc);
         var constants = ParseConstants(doc);
         var baseTypes = ParseBaseTypes(doc);
         var handles = ParseHandles(doc);
-
-        foreach (var funcPointer in funcPointerNodes) {
-            var proto = funcPointer.GetElement("proto");
-            var returnTypeStr = proto.GetElementValue("type").CleanName();
-            var name = proto.GetElementValue("name").CleanFunctionPointerName();
-
-            var type = new VulkanType(returnTypeStr, proto.Value, BaseTypeLookup);
-
-            FunctionPointerLookup[name] = new VulkanFunctionPointer(type, name, []);
-
-            Log.Debug("Parsed function pointer {Name} with return type {ReturnType}", name, type);
-        }
-
-        Log.Information("Parsed {Count} function pointers", funcPointerNodes.Count);
+        ParseFunctionPointers(doc);
 
         return new VulkanRegistry(enums, bitmasks, constants, baseTypes, handles);
     }
@@ -263,6 +244,35 @@ public static class Program {
         Log.Information("Parsed {Count} handles, of which {ToGenerateCount} will be generated", handleNodes.Count, handles.Count);
 
         return handles;
+    }
+
+    private static void ParseFunctionPointers(XDocument doc) {
+        var funcPointerNodes = doc.Descendants("type")
+            .Where(x => x.Attribute("category")?.Value == "funcpointer")
+            .ToList();
+
+        foreach (var funcPointer in funcPointerNodes) {
+            var proto = funcPointer.GetElement("proto");
+            var returnTypeStr = proto.GetElementValue("type").CleanName();
+            var name = proto.GetElementValue("name").CleanFunctionPointerName();
+
+            var type = new VulkanType(returnTypeStr, proto.Value, BaseTypeLookup);
+            var paramNodes = funcPointer.Elements("param");
+
+            List<VulkanFunctionParameter> paramTypes = [];
+            foreach (var param in paramNodes) {
+                var paramName = param.GetElementValue("name").CleanName();
+                var paramType = param.GetElementValue("type").CleanName();
+
+                paramTypes.Add(new VulkanFunctionParameter(new VulkanType(paramType, param.Value, BaseTypeLookup), paramName));
+            }
+
+            FunctionPointerLookup[name] = new VulkanFunctionPointer(type, name, paramTypes);
+
+            Log.Debug("Parsed function pointer {Name} with return type {ReturnType} and parameters ({Parameters})", name, type, string.Join(", ", paramTypes));
+        }
+
+        Log.Information("Parsed {Count} function pointers", funcPointerNodes.Count);
     }
 
     private static async Task WriteDefinitionsAsync(VulkanRegistry registry, string version) {
