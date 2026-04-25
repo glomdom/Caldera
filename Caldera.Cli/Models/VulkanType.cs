@@ -1,6 +1,6 @@
 ﻿namespace Caldera.Cli.Models;
 
-public sealed record VulkanType(string Type, bool IsPointer) {
+public sealed record VulkanType(string Type, bool IsPointer, int PointerIndirection = 0) {
     /// <summary>
     /// Uses the <c>NameSource</c> and <c>ParentSource</c> params
     /// to check for pointers, and sets it.
@@ -9,10 +9,14 @@ public sealed record VulkanType(string Type, bool IsPointer) {
     /// <param name="parentSource">The string of the entire element source containing the child name.</param>
     public VulkanType(string nameSource, string parentSource) : this(nameSource, HasStar(parentSource)) { }
 
-    public VulkanType(string nameSource, string parentSource, Dictionary<string, string> lookupTable) : this(GetName(nameSource, lookupTable), HasStar(parentSource)) { }
-    public VulkanType(string nameSource, string parentSource, Dictionary<string, VulkanFunctionPointer> lookupTable) : this(LookupFunction(nameSource, lookupTable), HasStar(parentSource)) { }
+    public VulkanType(string nameSource, string parentSource, Dictionary<string, string> lookupTable) : this(GetName(nameSource, lookupTable), HasStar(parentSource),
+        GetIndirection(parentSource)) { }
+
+    public VulkanType(string nameSource, string parentSource, Dictionary<string, VulkanFunctionPointer> lookupTable) : this(LookupFunction(nameSource, lookupTable),
+        HasStar(parentSource), GetIndirection(parentSource)) { }
 
     private static bool HasStar(string parent) => parent.Contains('*');
+    private static int GetIndirection(string parent) => parent.Count(c => c == '*');
 
     private static string LookupFunction(string name, Dictionary<string, VulkanFunctionPointer> lookupTable) {
         if (lookupTable.TryGetValue(name, out var pfn)) {
@@ -21,10 +25,10 @@ public sealed record VulkanType(string Type, bool IsPointer) {
 
         throw new ArgumentOutOfRangeException(nameof(name), name, "Provided function pointer name was not found in lookup table.");
     }
-    
+
     private static string GetName(string name, Dictionary<string, string> lookupTable) {
         return name == "PFN_vkVoidFunction" ? "delegate* unmanaged[Cdecl]<void>" : lookupTable.GetValueOrDefault(name, name);
     }
 
-    public override string ToString() => $"{Type}{(IsPointer ? "*" : "")}";
+    public override string ToString() => $"{Type}{(IsPointer ? new string('*', PointerIndirection) : "")}";
 }

@@ -103,6 +103,7 @@ public static class Program {
 
     private static List<VulkanEnum> ParseBitmasks(XDocument doc) {
         List<VulkanEnum> bitmasks = [];
+        HashSet<string> generatedFlags = [];
 
         var bitmaskNodes = doc.Descendants("enums")
             .Where(x => x.Attribute("name")?.Value != "API Constants" && x.Attribute("type")?.Value == "bitmask")
@@ -140,11 +141,31 @@ public static class Program {
             }
 
             bitmasks.Add(new VulkanEnum(cleanEnumName, true, underlyingType, values));
+            generatedFlags.Add(rawFlagsName);
 
             Log.Debug("Parsed bitmask {BitmaskName} of type {UnderlyingType} with {MemberCount} members", cleanEnumName, underlyingType, values.Count);
         }
 
-        Log.Information("Parsed {Count} bitmasks, of which {ToGenerateCount} will be generated", bitmasks.Count, bitmasks.Count);
+        var typeNodes = doc.Descendants("type")
+            .Where(x => x.Attribute("category")?.Value == "bitmask");
+
+        foreach (var typeNode in typeNodes) {
+            var rawFlagsName = typeNode.Element("name")?.Value;
+            if (string.IsNullOrEmpty(rawFlagsName)) continue;
+            if (generatedFlags.Contains(rawFlagsName)) continue;
+
+            var cleanEnumName = Utilities.CleanEnumName(rawFlagsName);
+            var innerType = typeNode.Element("type")?.Value;
+            var underlyingType = innerType == "VkFlags64" ? "ulong" : "uint";
+
+            List<VulkanEnumValue> emptyValues = [new VulkanEnumValue("None", "0")];
+
+            bitmasks.Add(new VulkanEnum(cleanEnumName, true, underlyingType, emptyValues));
+
+            Log.Debug("Parsed empty bitmask {BitmaskName} of type {UnderlyingType}", cleanEnumName, underlyingType);
+        }
+
+        Log.Information("Parsed {Count} bitmasks total", bitmasks.Count);
 
         return bitmasks;
     }
@@ -308,7 +329,6 @@ public static class Program {
             .Where(x => x.Attribute("category")?.Value == "struct")
             .ToList();
 
-        var counter = 0;
         foreach (var structNode in structNodes) {
             var name = structNode.GetUncheckedAttributeValue("name").CleanName();
 
@@ -327,12 +347,6 @@ public static class Program {
 
             var hasPointers = members.Any(x => x.Type.IsPointer);
             structs.Add(new VulkanStruct(name, members, hasPointers));
-
-            counter++;
-
-            if (counter == 25) {
-                break;
-            }
         }
 
         Log.Information("Parsed {Count} structs of which {ToGenerateCount} will be generated", structNodes.Count, structs.Count);
