@@ -335,6 +335,13 @@ public static class Program {
             List<VulkanStructMember> members = [];
             foreach (var member in structNode.Elements("member")) {
                 var memberName = member.GetElementValue("name").CleanName();
+                var memberApi = member.MaybeGetAttributeValue("api");
+                if (memberApi is not null && !memberApi.Split(',').Contains("vulkan")) {
+                    Log.Information("Skipping {MemberName} because it does not have vulkan api constraint", memberName);
+
+                    continue;
+                }
+
                 var memberRawType = Utilities.GetTypeFromXml(member.GetElementValue("type").CleanName().CleanFunctionPointerName());
                 if (FunctionPointerLookup.TryGetValue(memberRawType, out var fp)) {
                     var memberType = new VulkanType(fp.Name, member.Value, FunctionPointerLookup);
