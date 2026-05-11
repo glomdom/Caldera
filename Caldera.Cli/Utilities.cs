@@ -52,6 +52,7 @@ public static class Utilities {
         "uint8_t" => "byte",
         "uint32_t" => "uint",
         "uint64_t" => "ulong",
+        "int64_t" => "long",
         "size_t" => "nuint",
         "float" => "float",
         "void" => "void",

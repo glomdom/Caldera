@@ -6,5 +6,6 @@ public record VulkanRegistry(
     List<VulkanConstant> Constants,
     List<VulkanBaseType> BaseTypes,
     List<VulkanHandle> Handles,
-    List<VulkanStruct> Structs
+    List<VulkanStruct> Structs,
+    List<VulkanUnion> Unions
 );

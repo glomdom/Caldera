@@ -57,8 +57,9 @@ public static class Program {
         var handles = ParseHandles(doc);
         ParseFunctionPointers(doc);
         var structs = ParseStructs(doc);
+        var unions = ParseUnions(doc);
 
-        return new VulkanRegistry(enums, bitmasks, constants, baseTypes, handles, structs);
+        return new VulkanRegistry(enums, bitmasks, constants, baseTypes, handles, structs, unions);
     }
 
     private static List<VulkanEnum> ParseEnums(XDocument doc) {
@@ -361,6 +362,35 @@ public static class Program {
         return structs;
     }
 
+    private static List<VulkanUnion> ParseUnions(XDocument doc) {
+        List<VulkanUnion> unions = [];
+
+        var unionNodes = doc.Descendants("type")
+            .Where(x => x.Attribute("category")?.Value == "union")
+            .ToList();
+
+        foreach (var node in unionNodes) {
+            var unionName = node.GetUncheckedAttributeValue("name").CleanName();
+
+            Log.Warning("Parsed {Name}", unionName);
+
+            List<VulkanUnionMember> members = [];
+            foreach (var member in node.Elements("member")) {
+                var memberName = member.GetElementValue("name").CleanName();
+                var memberRawType = Utilities.GetTypeFromXml(member.GetElementValue("type").CleanName());
+
+                members.Add(new VulkanUnionMember(new VulkanType(memberRawType, member.Value, BaseTypeLookup), memberName));
+            }
+
+            var hasPointers = members.Any(x => x.Type.IsPointer);
+            unions.Add(new VulkanUnion(unionName, members, hasPointers));
+        }
+
+        Log.Information("Parsed {Count} unions of which {ToGenerateCount} will be generated", unionNodes.Count, unions.Count);
+
+        return unions;
+    }
+
     private static Dictionary<string, string> ParseBitmaskTypeMapping(XDocument doc) {
         return doc.Descendants("type")
             .Where(x => x.Attribute("category")?.Value == "bitmask")
@@ -394,6 +424,30 @@ public static class Program {
 
         await WriteStructsAsync(registry.Structs, prologue, genCodeAttribute);
         Log.Information("Wrote {Count} structs", registry.Structs.Count);
+
+        await WriteUnionsAsync(registry.Unions, prologue, genCodeAttribute);
+        Log.Information("Wrote {Count} unions", registry.Unions.Count);
+    }
+
+    private static async Task WriteUnionsAsync(List<VulkanUnion> unions, string prologue, string genCodeAttribute) {
+        Directory.CreateDirectory("autogen/unions");
+
+        foreach (var def in unions) {
+            await using var file = File.Create(Path.Combine("autogen", "unions", $"{def.Name}.cs"));
+            await using var writer = new StreamWriter(file);
+            
+            var structDefinition = "struct";
+            if (def.HasPointers) {
+                structDefinition = "unsafe struct";
+            }
+            
+            await writer.WriteLineAsync($"{prologue}\n\n{genCodeAttribute}\n[StructLayout(LayoutKind.Explicit)]\npublic {structDefinition} {def.Name} {{");
+            foreach (var value in def.Members) {
+                await writer.WriteLineAsync($"    [FieldOffset(0)]\npublic {value.Type} {value.Name};");
+            }
+
+            await writer.WriteLineAsync("}");
+        }
     }
 
     private static async Task WriteStructsAsync(List<VulkanStruct> structs, string prologue, string genCodeAttribute) {
