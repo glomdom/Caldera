@@ -443,7 +443,7 @@ public static class Program {
             
             await writer.WriteLineAsync($"{prologue}\n\n{genCodeAttribute}\n[StructLayout(LayoutKind.Explicit)]\npublic {structDefinition} {def.Name} {{");
             foreach (var value in def.Members) {
-                await writer.WriteLineAsync($"    [FieldOffset(0)]\npublic {value.Type} {value.Name};");
+                await writer.WriteLineAsync($"    [FieldOffset(0)]\n    public {value.Type} {value.Name};");
             }
 
             await writer.WriteLineAsync("}");
