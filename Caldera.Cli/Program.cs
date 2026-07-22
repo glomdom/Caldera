@@ -1,6 +1,7 @@
 ﻿using System.Text;
 using System.Xml.Linq;
 using Caldera.Cli.Extensions;
+using Caldera.Cli.Generation;
 using Caldera.Cli.Models;
 using Caldera.Cli.Parsing;
 using Serilog;
@@ -18,7 +19,7 @@ public static class Program {
             .WriteTo.Console()
             .CreateLogger();
 
-        var version = Utilities.GetAssemblyVersion();
+        var version = Metadata.GetAssemblyVersion();
 
         Banner.PrintBanner();
 
@@ -410,7 +411,7 @@ public static class Program {
     private static async Task WriteDefinitionsAsync(VulkanRegistry registry, string version) {
         Directory.CreateDirectory("autogen/bitmasks");
 
-        var prologue = Utilities.GetPrologueString(version);
+        var prologue = Metadata.GetPrologueString(version);
         var genCodeAttribute = $"[GeneratedCode(\"Caldera\", \"{version}\")]";
 
         await WriteConstantsAsync(registry.Constants, prologue, genCodeAttribute);
