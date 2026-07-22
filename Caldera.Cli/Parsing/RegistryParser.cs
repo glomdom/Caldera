@@ -8,9 +8,12 @@ public static class RegistryParser {
         var doc = XDocument.Parse(xmlString);
 
         var ctx = new ParseContext();
+        TypeParser.ParseFrom(doc, ctx);
+        
         var baseTypes = BaseTypeParser.ParseFrom(doc, ctx);
 
         FunctionPointerParser.ParseFrom(doc, ctx);
+        AliasParser.ParseFrom(doc, ctx);
 
         var enums = EnumParser.ParseFrom(doc);
         var bitmasks = BitmaskParser.ParseFrom(doc);

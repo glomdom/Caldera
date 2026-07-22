@@ -10,6 +10,12 @@ public static class BaseTypeParser {
 
         var baseTypeNodes = doc.Descendants("type")
             .Where(x => x.Attribute("category")?.Value == "basetype")
+            .Where(x => {
+                var value = x.Element("name")?.Value;
+                if (value is null) return false;
+
+                return !ctx.BlockedTypes.Contains(value);
+            })
             .ToList();
 
         foreach (var def in baseTypeNodes) {

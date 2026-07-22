@@ -6,24 +6,6 @@ using Serilog;
 namespace Caldera.Cli.Parsing;
 
 public static class StructParser {
-    // <type category="struct" name="VkBaseOutStructure">
-    // <member><type>VkStructureType</type> <name>sType</name></member>
-    // <member optional="true">struct <type>VkBaseOutStructure</type>* <name>pNext</name></member>
-    // </type>
-    // <type category="struct" name="VkBaseInStructure">
-    // <member><type>VkStructureType</type> <name>sType</name></member>
-    // <member optional="true">const struct <type>VkBaseInStructure</type>* <name>pNext</name></member>
-    // </type>
-    // <type category="struct" name="VkOffset2D"> OK
-    // <member><type>int32_t</type>        <name>x</name></member>
-    // <member><type>int32_t</type>        <name>y</name></member>
-    // </type>
-    // <type category="struct" name="VkOffset3D">
-    // <member><type>int32_t</type>        <name>x</name></member>
-    // <member><type>int32_t</type>        <name>y</name></member>
-    // <member><type>int32_t</type>        <name>z</name></member>
-    // </type>
-
     // TODO: parse optional properly, true/false does not change abi.
     //       optional="true,false" - pointer must be provided, elements can be null
     //       optional="false,true" - pointer can be null, if provided all elements must be valid
@@ -36,6 +18,8 @@ public static class StructParser {
 
         foreach (var structNode in structNodes) {
             var name = structNode.GetUncheckedAttributeValue("name").CleanName();
+            var drop = false;
+            var blockedTypeName = string.Empty;
 
             List<VulkanStructMember> members = [];
             foreach (var member in structNode.Elements("member")) {
@@ -48,18 +32,33 @@ public static class StructParser {
                     continue;
                 }
 
-                var memberRawType = Utilities.GetTypeFromXml(member.GetElementValue("type").CleanName().CleanFunctionPointerName());
-                if (memberRawType.EndsWith("FlagBits")) {
-                    memberRawType = memberRawType[..^4] + "s";
+                var memberRawType = Utilities.GetTypeFromXml(member.GetElementValue("type"));
+                if (ctx.BlockedTypes.Contains(memberRawType)) {
+                    drop = true;
+                    blockedTypeName = memberRawType;
                 }
+                
+                var cleanedMemberType = memberRawType.CleanName().CleanFunctionPointerName();
 
-                if (ctx.FunctionPointers.TryGetValue(memberRawType, out var fp)) {
+                if (ctx.FunctionPointers.TryGetValue(cleanedMemberType, out var fp)) {
                     var memberType = new VulkanType(fp.Name, member.Value, ctx.FunctionPointers);
                     members.Add(new VulkanStructMember(memberType, memberName));
                 } else {
-                    var memberType = new VulkanType(memberRawType.CleanName(), member.Value, ctx.BaseTypes);
+                    if (ctx.Aliases.TryGetValue(cleanedMemberType, out var alias)) {
+                        Log.Debug("Hit alias {Alias} for {Name}", alias, cleanedMemberType);
+                        
+                        cleanedMemberType = alias;
+                    }
+                    
+                    var memberType = new VulkanType(cleanedMemberType, member.Value, ctx.BaseTypes);
                     members.Add(new VulkanStructMember(memberType, memberName));
                 }
+            }
+
+            if (drop) {
+                Log.Information("Dropping struct {Name} because it references blocked type {Type}", name, blockedTypeName);
+                
+                continue;
             }
 
             var hasPointers = members.Any(x => x.Type.IsPointer);

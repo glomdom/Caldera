@@ -2,6 +2,10 @@
 
 public static class NameCleaning {
     public static string CleanEnumName(string raw) {
+        if (raw.Contains("FlagBits")) {
+            raw = raw.Replace("FlagBits", "Flags");
+        }
+        
         return raw switch {
             "object" => "@object",
             "event" => "@event",

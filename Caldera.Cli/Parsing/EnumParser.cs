@@ -39,6 +39,8 @@ public static class EnumParser {
             }
 
             enums.Add(new VulkanEnum(cleanEnumName, false, underlyingType, values));
+            
+            Log.Debug("Parsed enum {EnumName} with {ValueCount} values", cleanEnumName, values.Count);
         }
 
         Log.Information("Parsed {Count} enums, of which {ToGenerateCount} will be generated", enumNodes.Count, enums.Count);
