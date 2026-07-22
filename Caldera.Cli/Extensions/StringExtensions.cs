@@ -1,9 +1,11 @@
-﻿namespace Caldera.Cli.Extensions;
+﻿using Caldera.Cli.Parsing;
+
+namespace Caldera.Cli.Extensions;
 
 public static class StringExtensions {
     extension(string str) {
         public string CleanName() {
-            return Utilities.CleanEnumName(str);
+            return NameCleaning.CleanEnumName(str);
         }
 
         public string CleanFunctionPointerName() {

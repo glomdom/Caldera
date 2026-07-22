@@ -2,6 +2,7 @@
 using System.Xml.Linq;
 using Caldera.Cli.Extensions;
 using Caldera.Cli.Models;
+using Caldera.Cli.Parsing;
 using Serilog;
 
 namespace Caldera.Cli;
@@ -71,7 +72,7 @@ public static class Program {
 
         foreach (var enumNode in enumNodes) {
             var rawEnumName = enumNode.GetUncheckedAttributeValue("name");
-            var cleanEnumName = Utilities.CleanEnumName(rawEnumName);
+            var cleanEnumName = NameCleaning.CleanEnumName(rawEnumName);
             var bitwidth = enumNode.MaybeGetAttributeValue("bitwidth");
 
             var underlyingType = bitwidth == "64" ? "long" : "int";
@@ -80,13 +81,13 @@ public static class Program {
 
             foreach (var enumDef in enumNode.Elements("enum")) {
                 var memberName = enumDef.GetAttributeValue("name");
-                var cleanMemberName = Utilities.CleanEnumValue(memberName);
+                var cleanMemberName = NameCleaning.CleanEnumValue(memberName);
 
                 var exactValue = enumDef.Attribute("value")?.Value;
                 var alias = enumDef.Attribute("alias")?.Value;
 
                 var finalValue = exactValue != null ? exactValue.Replace("ULL", "UL")
-                    : alias != null ? Utilities.CleanEnumValue(alias)
+                    : alias != null ? NameCleaning.CleanEnumValue(alias)
                     : string.Empty;
 
                 if (!string.IsNullOrEmpty(finalValue)) {
@@ -116,7 +117,7 @@ public static class Program {
             var rawEnumName = bitmaskNode.GetUncheckedAttributeValue("name");
             var rawFlagsName = mapping.GetValueOrDefault(rawEnumName, rawEnumName);
 
-            var cleanEnumName = Utilities.CleanEnumName(rawFlagsName);
+            var cleanEnumName = NameCleaning.CleanEnumName(rawFlagsName);
             var bitwidth = bitmaskNode.MaybeGetAttributeValue("bitwidth");
 
             var underlyingType = bitwidth == "64" ? "ulong" : "uint";
@@ -125,7 +126,7 @@ public static class Program {
 
             foreach (var enumDef in bitmaskNode.Elements("enum")) {
                 var memberName = enumDef.GetAttributeValue("name");
-                var cleanMemberName = Utilities.CleanEnumValue(memberName);
+                var cleanMemberName = NameCleaning.CleanEnumValue(memberName);
 
                 var exactValue = enumDef.Attribute("value")?.Value;
                 var bitpos = enumDef.Attribute("bitpos")?.Value;
@@ -133,7 +134,7 @@ public static class Program {
 
                 var finalValue = exactValue != null ? exactValue.Replace("ULL", "UL")
                     : bitpos != null ? $"(1U << {bitpos})"
-                    : alias != null ? Utilities.CleanEnumValue(alias)
+                    : alias != null ? NameCleaning.CleanEnumValue(alias)
                     : string.Empty;
 
                 if (!string.IsNullOrEmpty(finalValue)) {
@@ -155,7 +156,7 @@ public static class Program {
             if (string.IsNullOrEmpty(rawFlagsName)) continue;
             if (generatedFlags.Contains(rawFlagsName)) continue;
 
-            var cleanEnumName = Utilities.CleanEnumName(rawFlagsName);
+            var cleanEnumName = NameCleaning.CleanEnumName(rawFlagsName);
             var innerType = typeNode.Element("type")?.Value;
             var underlyingType = innerType == "VkFlags64" ? "ulong" : "uint";
 
@@ -180,9 +181,9 @@ public static class Program {
         foreach (var def in apiConstantsNode.Elements("enum")) {
             var memberName = def.GetAttributeValue("name");
             var memberType = Utilities.GetTypeFromXml(def.GetUncheckedAttributeValue("type"));
-            var value = Utilities.NormalizeValue(def.GetUncheckedAttributeValue("value"));
+            var value = NameCleaning.NormalizeValue(def.GetUncheckedAttributeValue("value"));
 
-            constants.Add(new VulkanConstant(Utilities.CleanEnumValue(memberName), memberType, value));
+            constants.Add(new VulkanConstant(NameCleaning.CleanEnumValue(memberName), memberType, value));
         }
 
         Log.Information("Parsed API constants");
@@ -201,7 +202,7 @@ public static class Program {
             var rawMemberName = def.Element("name")?.Value;
             if (rawMemberName is null) continue;
 
-            var memberName = Utilities.CleanEnumName(rawMemberName);
+            var memberName = NameCleaning.CleanEnumName(rawMemberName);
 
             var innerType = def.Element("type")?.Value;
             var opaque = false;
@@ -255,7 +256,7 @@ public static class Program {
                 continue;
             }
 
-            var name = Utilities.CleanEnumName(rawName);
+            var name = NameCleaning.CleanEnumName(rawName);
             var type = def.Element("type")?.Value;
             if (type is null) {
                 Log.Warning("Unable to get 'type' element inside handle '{Name}'", name);
