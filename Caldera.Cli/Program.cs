@@ -20,7 +20,7 @@ public static class Program {
 
         var version = Utilities.GetAssemblyVersion();
 
-        Utilities.PrintBanner();
+        Banner.PrintBanner();
 
         Log.Information("Downloading vk.xml");
         var xmlString = await DownloadVkXmlAsync();
