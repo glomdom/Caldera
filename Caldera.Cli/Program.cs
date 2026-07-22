@@ -50,8 +50,6 @@ public static class Program {
     }
 
     private static async Task WriteDefinitionsAsync(VulkanRegistry registry, string version) {
-        Directory.CreateDirectory("autogen/bitmasks");
-
         var prologue = Metadata.GetPrologueString(version);
         var genCodeAttribute = $"[GeneratedCode(\"Caldera\", \"{version}\")]";
 
@@ -77,42 +75,25 @@ public static class Program {
         Log.Information("Wrote {Count} unions", registry.Unions.Count);
     }
 
-    private static async Task WriteUnionsAsync(List<VulkanUnion> unions, string prologue, string genCodeAttribute) {
-        Directory.CreateDirectory("autogen/unions");
+    private static async Task WriteEachAsync<T>(
+        IEnumerable<T> defs,
+        string subdir,
+        string prologue,
+        string genCodeAttr,
+        Func<T, string> fileName,
+        Func<T, string> header,
+        Func<T, IEnumerable<string>> body
+    ) {
+        Directory.CreateDirectory(Path.Combine("autogen", subdir));
 
-        foreach (var def in unions) {
-            await using var file = File.Create(Path.Combine("autogen", "unions", $"{def.Name}.cs"));
+        foreach (var def in defs) {
+            await using var file = File.Create(Path.Combine("autogen", subdir, fileName(def)));
             await using var writer = new StreamWriter(file);
 
-            var structDefinition = "struct";
-            if (def.HasPointers) {
-                structDefinition = "unsafe struct";
-            }
+            await writer.WriteLineAsync($"{prologue}\n\n{genCodeAttr}\n{header(def)}");
 
-            await writer.WriteLineAsync($"{prologue}\n\n{genCodeAttribute}\n[StructLayout(LayoutKind.Explicit)]\npublic {structDefinition} {def.Name} {{");
-            foreach (var value in def.Members) {
-                await writer.WriteLineAsync($"    [FieldOffset(0)]\n    public {value.Type} {value.Name};");
-            }
-
-            await writer.WriteLineAsync("}");
-        }
-    }
-
-    private static async Task WriteStructsAsync(List<VulkanStruct> structs, string prologue, string genCodeAttribute) {
-        Directory.CreateDirectory("autogen/structs");
-
-        foreach (var def in structs) {
-            await using var file = File.Create(Path.Combine("autogen", "structs", $"{def.Name}.cs"));
-            await using var writer = new StreamWriter(file);
-
-            var structDefinition = "struct";
-            if (def.HasPointers) {
-                structDefinition = "unsafe struct";
-            }
-
-            await writer.WriteLineAsync($"{prologue}\n\n{genCodeAttribute}\n[StructLayout(LayoutKind.Sequential)]\npublic {structDefinition} {def.Name} {{");
-            foreach (var value in def.Members) {
-                await writer.WriteLineAsync($"    public {value.Type} {value.Name};");
+            foreach (var line in body(def)) {
+                await writer.WriteLineAsync(line);
             }
 
             await writer.WriteLineAsync("}");
@@ -134,63 +115,51 @@ public static class Program {
         await writer.WriteLineAsync("}");
     }
 
-    private static async Task WriteEnumsAsync(List<VulkanEnum> enums, string prologue, string genCodeAttribute) {
-        Directory.CreateDirectory("autogen/enums");
+    private static Task WriteEnumsAsync(List<VulkanEnum> enums, string prologue, string genCodeAttribute) =>
+        WriteEachAsync(
+            enums, "enums", prologue, genCodeAttribute,
+            def => $"{def.Name}.cs",
+            def => $"public enum {def.Name} : {def.UnderlyingType} {{",
+            def => def.Values.Select(v => $"    {v.Name} = {v.Value},")
+        );
 
-        foreach (var def in enums) {
-            await using var file = File.Create(Path.Combine("autogen", "enums", $"{def.Name}.cs"));
-            await using var writer = new StreamWriter(file);
+    private static Task WriteBitmasksAsync(List<VulkanEnum> bitmasks, string prologue, string genCodeAttribute) =>
+        WriteEachAsync(
+            bitmasks, "bitmasks", prologue, genCodeAttribute,
+            def => $"{def.Name}.cs",
+            def => $"[Flags]\npublic enum {def.Name} : {def.UnderlyingType} {{",
+            def => def.Values.Select(v => $"    {v.Name} = {v.Value},")
+        );
 
-            await writer.WriteLineAsync($"{prologue}\n\n{genCodeAttribute}\npublic enum {def.Name} : {def.UnderlyingType} {{");
-            foreach (var value in def.Values) {
-                await writer.WriteLineAsync($"    {value.Name} = {value.Value},");
-            }
+    private static Task WriteBaseTypesAsync(List<VulkanBaseType> baseTypes, string prologue, string genCodeAttribute) =>
+        WriteEachAsync(
+            baseTypes.Where(t => t.IsOpaque), "basetypes", prologue, genCodeAttribute,
+            def => $"{def.Name}.cs",
+            def => $"public readonly record struct {def.Name}(nint Handle) {{",
+            def => [$"    public static readonly {def.Name} Null = new(0);"]
+        );
 
-            await writer.WriteLineAsync("}");
-        }
-    }
+    private static Task WriteHandlesAsync(List<VulkanHandle> handles, string prologue, string genCodeAttribute) =>
+        WriteEachAsync(
+            handles, "handles", prologue, genCodeAttribute,
+            def => $"{def.Name}.cs",
+            def => $"public readonly record struct {def.Name}({(def.Dispatchable ? "nint" : "ulong")} Handle) {{",
+            def => [$"    public static readonly {def.Name} Null = new(0);"]
+        );
 
-    private static async Task WriteBitmasksAsync(List<VulkanEnum> bitmasks, string prologue, string genCodeAttribute) {
-        Directory.CreateDirectory("autogen/bitmasks");
+    private static Task WriteStructsAsync(List<VulkanStruct> structs, string prologue, string genCodeAttribute) =>
+        WriteEachAsync(
+            structs, "structs", prologue, genCodeAttribute,
+            def => $"{def.Name}.cs",
+            def => $"[StructLayout(LayoutKind.Sequential)]\npublic {(def.HasPointers ? "unsafe struct" : "struct")} {def.Name} {{",
+            def => def.Members.Select(m => $"    public {m.Type} {m.Name};")
+        );
 
-        foreach (var vulkanBitmask in bitmasks) {
-            await using var file = File.Create(Path.Combine("autogen", "bitmasks", $"{vulkanBitmask.Name}.cs"));
-            await using var writer = new StreamWriter(file);
-
-            await writer.WriteLineAsync($"{prologue}\n\n{genCodeAttribute}\n[Flags]\npublic enum {vulkanBitmask.Name} : {vulkanBitmask.UnderlyingType} {{");
-            foreach (var value in vulkanBitmask.Values) {
-                await writer.WriteLineAsync($"    {value.Name} = {value.Value},");
-            }
-
-            await writer.WriteLineAsync("}");
-        }
-    }
-
-    private static async Task WriteBaseTypesAsync(List<VulkanBaseType> baseTypes, string prologue, string genCodeAttribute) {
-        Directory.CreateDirectory("autogen/basetypes");
-
-        foreach (var type in baseTypes.Where(type => type.IsOpaque)) {
-            await using var file = File.Create(Path.Combine("autogen", "basetypes", $"{type.Name}.cs"));
-            await using var writer = new StreamWriter(file);
-
-            await writer.WriteLineAsync($"{prologue}\n\n{genCodeAttribute}\npublic readonly record struct {type.Name}(nint Handle) {{");
-            await writer.WriteLineAsync($"    public static readonly {type.Name} Null = new(0);");
-            await writer.WriteLineAsync("}");
-        }
-    }
-
-    private static async Task WriteHandlesAsync(List<VulkanHandle> handles, string prologue, string genCodeAttribute) {
-        Directory.CreateDirectory("autogen/handles");
-
-        foreach (var handle in handles) {
-            await using var file = File.Create(Path.Combine("autogen", "handles", $"{handle.Name}.cs"));
-            await using var writer = new StreamWriter(file);
-
-            var handleType = handle.Dispatchable ? "nint" : "ulong";
-
-            await writer.WriteLineAsync($"{prologue}\n\n{genCodeAttribute}\npublic readonly record struct {handle.Name}({handleType} Handle) {{");
-            await writer.WriteLineAsync($"    public static readonly {handle.Name} Null = new(0);");
-            await writer.WriteLineAsync("}");
-        }
-    }
+    private static Task WriteUnionsAsync(List<VulkanUnion> unions, string prologue, string genCodeAttribute) =>
+        WriteEachAsync(
+            unions, "unions", prologue, genCodeAttribute,
+            def => $"{def.Name}.cs",
+            def => $"[StructLayout(LayoutKind.Explicit)]\npublic {(def.HasPointers ? "unsafe struct" : "struct")} {def.Name} {{",
+            def => def.Members.Select(m => $"    [FieldOffset(0)]\n    public {m.Type} {m.Name};")
+        );
 }

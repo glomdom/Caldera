@@ -1,6 +1,4 @@
-﻿using System.Reflection;
-
-namespace Caldera.Cli;
+﻿namespace Caldera.Cli;
 
 public static class Utilities {
     public static string GetTypeFromXml(string xmlType) => xmlType switch {
