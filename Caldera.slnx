@@ -1,4 +1,5 @@
 <Solution>
   <Project Path="Caldera.Cli/Caldera.Cli.csproj" />
+  <Project Path="Caldera.LayoutDumper/Caldera.LayoutDumper.csproj" />
   <Project Path="Caldera/Caldera.csproj" />
 </Solution>
