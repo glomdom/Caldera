@@ -2,11 +2,12 @@
 using Caldera.Cli.Parsing;
 using Caldera.Cli.Writing;
 using Serilog;
+using Spectre.Console;
 
 namespace Caldera.Cli;
 
 public static class Program {
-    public static async Task Main() {
+    public static async Task Main(string[] args) {
         Log.Logger = new LoggerConfiguration()
             .MinimumLevel.Verbose()
             .WriteTo.Console()
@@ -16,8 +17,13 @@ public static class Program {
 
         Banner.PrintBanner();
 
-        Log.Information("Downloading vk.xml");
-        var xmlString = await VkDownloader.DownloadVkXmlAsync();
+        if (args.Length < 1) {
+            Console.MarkupLine("[red]error:[/] missing vk.xml path argument");
+            
+            Environment.Exit(-1);
+        }
+
+        var xmlString = await File.ReadAllTextAsync(args[0]);
 
         Log.Information("Parsing definitions from vk.xml");
         var registry = RegistryParser.ParseFrom(xmlString);
