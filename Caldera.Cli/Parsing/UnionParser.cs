@@ -23,7 +23,15 @@ public static class UnionParser {
                 var memberName = member.GetElementValue("name").CleanName();
                 var memberRawType = Utilities.GetTypeFromXml(member.GetElementValue("type").CleanName());
 
-                members.Add(new VulkanUnionMember(new VulkanType(memberRawType, member.Value, ctx.BaseTypes), memberName));
+                var arrCount = Utilities.ResolveArrayLength(member, ctx);
+                var memberType = new VulkanType(memberRawType, member.Value, ctx.BaseTypes).WithArray(arrCount);
+                if (memberType.IsArray) {
+                    var at = ctx.Arrays.Add(memberType, arrCount!.Value);
+                        
+                    members.Add(new VulkanUnionMember(new VulkanType(at.TypeName), memberName));
+                } else {
+                    members.Add(new VulkanUnionMember(memberType, memberName));
+                }
             }
 
             var hasPointers = members.Any(x => x.Type.IsPointer);
