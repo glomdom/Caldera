@@ -14,13 +14,30 @@ public static class AliasParser {
                 x => x.Attribute("name")!.Value.CleanName(),
                 x => x.Attribute("alias")!.Value.CleanName()
             );
-        
+
+        var structAliases = doc.Descendants("type")
+            .Where(x => x.Attribute("category")?.Value == "struct")
+            .Where(x => x.Attribute("name")?.Value is not null)
+            .Where(x => x.Attribute("alias")?.Value is not null)
+            .ToDictionary(
+                x => x.Attribute("name")!.Value.CleanName(),
+                x => x.Attribute("alias")!.Value.CleanName()
+            );
+
         foreach (var (name, alias) in enumAliases) {
             ctx.Aliases[name] = alias;
-            
+
             Log.Debug("Mapped {Name} to {Aliased}", name, alias);
         }
-        
+
         Log.Information("Parsed {AliasCount} enum aliases", enumAliases.Count);
+
+        foreach (var (name, alias) in structAliases) {
+            ctx.Aliases[name] = alias;
+
+            Log.Debug("Mapped {Name} to {Aliased}", name, alias);
+        }
+
+        Log.Information("Parsed {AliasCount} struct aliases", structAliases.Count);
     }
 }
