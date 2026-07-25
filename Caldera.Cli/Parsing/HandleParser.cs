@@ -17,6 +17,7 @@ public static class HandleParser {
             var rawName = def.Element("name")?.Value;
             if (rawName is null || string.IsNullOrEmpty(def.Value)) {
                 Log.Warning("Unable to get 'name' from handle, is it an alias?");
+
                 continue;
             }
 

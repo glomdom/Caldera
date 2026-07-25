@@ -25,50 +25,55 @@ def parse_layouts(path):
     structs = {}
     cur = None
 
-    fields_re = re.compile(
-        r"^\s*(\d+)\s*\|\s+(.+?)\s+(\w+)(\[\d+\])?\s*$"
-    )  # matches : num | type name
-
-    size_re = re.compile(r"\[sizeof=(\d+),\s*align=(\d+)\]")
-    head_re = re.compile(r"struct\s+(\w+)\b")
+    field_re = re.compile(r"^\s*(\d+)\s*\|(\s+)(.+?)\s+(\w+)(\[\d+\])?\s*$")
+    size_re = re.compile(r"^\s*\|\s*\[sizeof=(\d+),\s*align=(\d+)\]")
+    head_re = re.compile(r"^\s*0\s*\|\s*(?:struct|class|union)\s+(\w+)\b")
 
     with open(path, encoding="utf-8", errors="replace") as fp:
         for line in fp:
             if "Dumping AST Record Layout" in line:
                 cur = None
-                print(". Starting struct parsing")
 
                 continue
 
-            m = head_re.search(line)
-            if m and "|" in line and line.split("|")[0].strip() == "0":  # top of struct
-                print(f"+ Got struct {m.group(1)}")
-
-                cur = {"name": m.group(1), "fields": []}
-                structs[m.group(1)] = cur
+            h = head_re.match(line)
+            if h and cur is None:
+                cur = {"name": h.group(1), "fields": []}
+                structs[h.group(1)] = cur
 
                 continue
 
             if cur is None:
                 continue
 
-            s = size_re.search(line)
-            if s:
+            s = size_re.match(line)
+            if s and "size" not in cur:
                 cur["size"] = int(s.group(1))
-                cur["align"] = int(s.group(1))
-
-                print(f"+ With sizeof={cur['size']} and align={cur['align']}")
-
+                cur["align"] = int(s.group(2))
                 cur = None
+
                 continue
 
-            f = fields_re.match(line)
-            if f and "|" in line:
-                off = int(f.group(1))
-                name = f.group(3)
-                cur["fields"].append({"name": name, "offset": off})
+            m = field_re.match(line)
+            if not m:
+                continue
 
-        return {k: v for k, v in structs.items() if "size" in v}
+            indent = len(m.group(2))
+            if "indent" not in cur:
+                cur["indent"] = indent
+
+            if indent != cur["indent"]:
+                continue
+
+            cur["fields"].append({"name": m.group(4), "offset": int(m.group(1))})
+
+    out = {}
+    for k, v in structs.items():
+        if "size" in v:
+            v.pop("indent", None)
+            out[k] = v
+
+    return out
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@ import json
 
 
 def norm(name):
-    return name[2:] if name.startswith("Vk") else name
+work     return name.removeprefix("Vk")
 
 
 c = {norm(k): v for k, v in json.load(open("layouts.json")).items()}

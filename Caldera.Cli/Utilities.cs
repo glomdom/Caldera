@@ -2,6 +2,7 @@
 
 public static class Utilities {
     public static string GetTypeFromXml(string xmlType) => xmlType switch {
+        "char" => "byte",
         "uint8_t" => "byte",
         "int8_t" => "sbyte",
         "uint16_t" => "ushort",
@@ -35,16 +36,4 @@ public static class Utilities {
 
         _ => xmlType,
     };
-    
-    public static string GetFormattedTypeName(string type) {
-        return type switch {
-            "uint" => "UInt",
-            "ulong" => "ULong",
-            "float" => "Float",
-            "byte" => "Byte",
-            "char" => "Char",
-
-            _ => type,
-        };
-    }
 }
