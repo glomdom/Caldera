@@ -2,7 +2,7 @@ import json
 
 
 def norm(name):
-work     return name.removeprefix("Vk")
+    return name.removeprefix("Vk")
 
 
 c = {norm(k): v for k, v in json.load(open("layouts.json")).items()}
