@@ -1,4 +1,5 @@
-﻿using System.Xml.Linq;
+﻿using System.Data;
+using System.Xml.Linq;
 using Caldera.Cli.Models;
 using Serilog;
 
@@ -24,7 +25,7 @@ public static class HandleParser {
             var name = NameCleaning.CleanEnumName(rawName);
             var type = def.Element("type")?.Value;
             if (type is null) {
-                Log.Warning("Unable to get 'type' element inside handle '{Name}'", name);
+                throw new DataException($"Unable to get 'type' element inside handle '{name}'");
             }
 
             var dispatchable = type != "VK_DEFINE_NON_DISPATCHABLE_HANDLE";
