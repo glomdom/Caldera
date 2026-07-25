@@ -26,6 +26,7 @@ def parse_layouts(path):
     cur = None
 
     field_re = re.compile(r"^\s*(\d+)\s*\|(\s+)(.+?)\s+(\w+)(\[\d+\])?\s*$")
+    bitfield_re = re.compile(r"^\s*(\d+):(\d+)-(\d+)\s*\|(\s+)(.+?)\s+(\w+)\s*$")
     size_re = re.compile(r"^\s*\|\s*\[sizeof=(\d+),\s*align=(\d+)\]")
     head_re = re.compile(r"^\s*0\s*\|\s*(?:struct|class|union)\s+(\w+)\b")
 
@@ -33,14 +34,12 @@ def parse_layouts(path):
         for line in fp:
             if "Dumping AST Record Layout" in line:
                 cur = None
-
                 continue
 
             h = head_re.match(line)
             if h and cur is None:
                 cur = {"name": h.group(1), "fields": []}
                 structs[h.group(1)] = cur
-
                 continue
 
             if cur is None:
@@ -51,21 +50,32 @@ def parse_layouts(path):
                 cur["size"] = int(s.group(1))
                 cur["align"] = int(s.group(2))
                 cur = None
+                continue
+
+            b = bitfield_re.match(line)
+            if b:
+                if not accept(cur, len(b.group(4))):
+                    continue
+
+                first, last = int(b.group(2)), int(b.group(3))
+                cur["fields"].append(
+                    {
+                        "name": b.group(6),
+                        "offset": int(b.group(1)),
+                        "bitfield": True,
+                        "bit_offset": first,
+                        "bit_width": last - first + 1,
+                    }
+                )
 
                 continue
 
             m = field_re.match(line)
-            if not m:
-                continue
+            if m:
+                if not accept(cur, len(m.group(2))):
+                    continue
 
-            indent = len(m.group(2))
-            if "indent" not in cur:
-                cur["indent"] = indent
-
-            if indent != cur["indent"]:
-                continue
-
-            cur["fields"].append({"name": m.group(4), "offset": int(m.group(1))})
+                cur["fields"].append({"name": m.group(4), "offset": int(m.group(1))})
 
     out = {}
     for k, v in structs.items():
@@ -74,6 +84,13 @@ def parse_layouts(path):
             out[k] = v
 
     return out
+
+
+def accept(cur, indent):
+    if "indent" not in cur:
+        cur["indent"] = indent
+
+    return indent == cur["indent"]
 
 
 if __name__ == "__main__":
