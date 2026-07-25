@@ -2,6 +2,9 @@
 .vs/
 .vscode/
 
+scripts/*.json
+scripts/*.txt
+
 bin/
 obj/
 
