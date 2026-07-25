@@ -15,9 +15,7 @@ public static class UnionParser {
 
         foreach (var node in unionNodes) {
             var unionName = node.GetUncheckedAttributeValue("name").CleanName();
-
-            Log.Warning("Parsed {Name}", unionName);
-
+            
             List<VulkanUnionMember> members = [];
             foreach (var member in node.Elements("member")) {
                 var memberName = member.GetElementValue("name").CleanName();
