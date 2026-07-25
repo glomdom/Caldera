@@ -1,5 +1,6 @@
 ﻿using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 
 if (args.Length < 2) {
@@ -22,18 +23,15 @@ foreach (var t in asm.GetTypes()) {
         var (fields, size, align) = layout.Layout(t);
         result[t.Name] = new { size, align, fields };
 
-        if (fields.Count == 0)
-            Console.WriteLine($"! {t.Name} has NO fields - handle type missing its backing field?");
-        else
-            Console.WriteLine($"+ {t.Name} has size {size} align {align}");
+        Console.WriteLine(fields.Count == 0 ? $"! {t.Name} has NO fields - handle type missing its backing field?" : $"+ {t.Name} has size {size} align {align}");
     } catch (Exception ex) {
         skipped.Add($"{t.Name}: {ex.Message}");
     }
 }
 
 File.WriteAllText(Path.Combine(args[1], "cs_layouts.json"), JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }));
-Console.WriteLine($"+ Saved {result.Count} structs to cs_layouts.json");
 
+Console.WriteLine($"+ Saved {result.Count} structs to cs_layouts.json");
 if (skipped.Count > 0) {
     Console.WriteLine($"! Skipped {skipped.Count}:");
 
@@ -49,18 +47,47 @@ sealed class LayoutComputer {
     public sealed record FieldLayout(string name, int offset, int size, int align);
 
     public (List<FieldLayout> Fields, int Size, int Align) Layout(Type t) {
+        var sla = t.StructLayoutAttribute;
+        var isExplicit = sla?.Value == LayoutKind.Explicit;
+        var pack = sla?.Pack ?? 0; // 0 == natural alignment
+
         var fields = new List<FieldLayout>();
-        int offset = 0, structAlign = 1;
+        int cursor = 0, extent = 0, structAlign = 1;
 
         foreach (var f in DeclarationOrder(t)) {
             var (fs, fa) = SizeAndAlign(f.FieldType);
-            offset = Align(offset, fa);
+            if (pack > 0) fa = Math.Min(fa, pack);
+
+            int offset;
+            if (isExplicit) {
+                offset = ExplicitOffset(t, f);
+            } else {
+                offset = Align(cursor, fa);
+                cursor = offset + fs;
+            }
+
             fields.Add(new FieldLayout(CleanFieldName(f.Name), offset, fs, fa));
-            offset += fs;
+            extent = Math.Max(extent, offset + fs);
             structAlign = Math.Max(structAlign, fa);
         }
 
-        return fields.Count == 0 ? (fields, 1, 1) : (fields, Align(offset, structAlign), structAlign);
+        if (fields.Count == 0) return (fields, 1, 1);
+
+        var size = Align(extent, structAlign);
+        if (sla is { Size: > 0 }) size = Math.Max(size, sla.Size);
+
+        return (fields, size, structAlign);
+    }
+
+    private static int ExplicitOffset(Type t, FieldInfo f) {
+        var attr = f.GetCustomAttribute<FieldOffsetAttribute>();
+        if (attr is not null) return attr.Value;
+
+        try {
+            return (int)Marshal.OffsetOf(t, f.Name);
+        } catch (Exception ex) {
+            throw new NotSupportedException($"{t.Name}.{f.Name}: explicit layout with no readable [FieldOffset]", ex);
+        }
     }
 
     public (int Size, int Align) SizeAndAlign(Type t) {
@@ -73,11 +100,13 @@ sealed class LayoutComputer {
     }
 
     private (int, int) Compute(Type t) {
-        if (t.IsPointer || t.IsByRef || t == typeof(IntPtr) || t == typeof(UIntPtr))
+        if (t.IsPointer || t.IsByRef || t == typeof(IntPtr) || t == typeof(UIntPtr)) {
             return (_pointerSize, _pointerSize);
+        }
 
-        if (t.IsEnum)
+        if (t.IsEnum) {
             return SizeAndAlign(Enum.GetUnderlyingType(t));
+        }
 
         // [InlineArray(N)] over element E -> size N*sizeof(E), align alignof(E)
         if (IsInlineArray(t, out var length, out var element)) {
@@ -89,13 +118,11 @@ sealed class LayoutComputer {
         var prim = Primitive(t);
         if (prim is not null) return prim.Value;
 
-        if (t.IsValueType) {
-            var (_, size, align) = Layout(t);
+        if (!t.IsValueType) throw new NotSupportedException($"cannot size reference type {t.FullName}");
 
-            return (size, align);
-        }
+        var (_, size, align) = Layout(t);
 
-        throw new NotSupportedException($"cannot size reference type {t.FullName}");
+        return (size, align);
     }
 
     private (int, int)? Primitive(Type t) => Type.GetTypeCode(t) switch {
@@ -103,6 +130,7 @@ sealed class LayoutComputer {
         TypeCode.Int16 or TypeCode.UInt16 or TypeCode.Char => (2, 2),
         TypeCode.Int32 or TypeCode.UInt32 or TypeCode.Single => (4, 4),
         TypeCode.Int64 or TypeCode.UInt64 or TypeCode.Double => (8, 8),
+
         _ => null,
     };
 
