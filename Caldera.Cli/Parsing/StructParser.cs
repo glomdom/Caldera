@@ -1,4 +1,5 @@
-﻿using System.Xml.Linq;
+﻿using System.Text.RegularExpressions;
+using System.Xml.Linq;
 using Caldera.Cli.Extensions;
 using Caldera.Cli.Models;
 using Serilog;
@@ -37,7 +38,7 @@ public static class StructParser {
                     drop = true;
                     blockedTypeName = memberRawType;
                 }
-                
+
                 var cleanedMemberType = memberRawType.CleanName().CleanFunctionPointerName();
 
                 if (ctx.FunctionPointers.TryGetValue(cleanedMemberType, out var fp)) {
@@ -46,18 +47,25 @@ public static class StructParser {
                 } else {
                     if (ctx.Aliases.TryGetValue(cleanedMemberType, out var alias)) {
                         Log.Debug("Hit alias {Alias} for {Name}", alias, cleanedMemberType);
-                        
+
                         cleanedMemberType = alias;
                     }
-                    
-                    var memberType = new VulkanType(cleanedMemberType, member.Value, ctx.BaseTypes);
-                    members.Add(new VulkanStructMember(memberType, memberName));
+
+                    var arrCount = ResolveArrayLength(member, ctx);
+                    var memberType = new VulkanType(cleanedMemberType, member.Value, ctx.BaseTypes).WithArray(arrCount);
+                    if (memberType.IsArray) {
+                        var at = ctx.Arrays.Add(memberType, arrCount!.Value);
+                        
+                        members.Add(new VulkanStructMember(new VulkanType(at.TypeName), memberName));
+                    } else {
+                        members.Add(new VulkanStructMember(memberType, memberName));
+                    }
                 }
             }
 
             if (drop) {
                 Log.Information("Dropping struct {Name} because it references blocked type {Type}", name, blockedTypeName);
-                
+
                 continue;
             }
 
@@ -67,6 +75,42 @@ public static class StructParser {
 
         Log.Information("Parsed {Count} structs of which {ToGenerateCount} will be generated", structNodes.Count, structs.Count);
 
+        Log.Debug("Have to generate {ArrayCount} inline arrays", ctx.Arrays.All.Count);
+
+        foreach (var x in ctx.Arrays.All) {
+            Log.Debug("Array of type {ElementType} and element count {Count} will be generated as {SanitizedName}", x.ElementType, x.Count, x.TypeName);
+        }
+
         return structs;
+    }
+
+    private static int? ResolveArrayLength(XElement member, ParseContext ctx) {
+        var dims = new List<int>();
+
+        foreach (var enumEl in member.Elements("enum")) {
+            var constName = NameCleaning.CleanEnumValue(enumEl.Value);
+            if (!ctx.Constants.TryGetValue(constName, out var val)) {
+                throw new InvalidOperationException($"Array member references unknown constant '{constName}'");
+            }
+
+            Log.Debug("Replacing constant {ConstantName} with {ConstantValue}", constName, val.Value);
+
+            dims.Add(Convert.ToInt32(val.Value));
+        }
+
+        var tail = string.Concat(
+            member.Nodes()
+                .SkipWhile(n => !(n is XElement e && e.Name == "name"))
+                .Skip(1)
+                .OfType<XText>()
+                .Select(t => t.Value));
+
+        foreach (Match m in Regex.Matches(tail, @"\[(\d+)\]")) {
+            dims.Add(int.Parse(m.Groups[1].Value));
+        }
+
+        if (dims.Count == 0) return null;
+
+        return dims.Aggregate(1, (a, b) => a * b);
     }
 }

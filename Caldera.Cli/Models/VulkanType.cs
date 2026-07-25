@@ -1,8 +1,10 @@
 ﻿namespace Caldera.Cli.Models;
 
-public sealed record VulkanType(string Type, bool IsPointer, int PointerIndirection = 0) {
+public sealed record VulkanType(string Type, bool IsPointer = false, int PointerIndirection = 0, int? ArrayCount = null) {
+    public bool IsArray => ArrayCount is not null;
+
     /// <summary>
-    /// Uses the <c>NameSource</c> and <c>ParentSource</c> params
+    /// Uses the <c>NameSource</c> and <c>ParentSource</c> params   
     /// to check for pointers, and sets it.
     /// </summary>
     /// <param name="nameSource">The string containing the name of the type.</param>
@@ -14,6 +16,9 @@ public sealed record VulkanType(string Type, bool IsPointer, int PointerIndirect
 
     public VulkanType(string nameSource, string parentSource, Dictionary<string, VulkanFunctionPointer> lookupTable) : this(LookupFunction(nameSource, lookupTable),
         HasStar(parentSource), GetIndirection(parentSource)) { }
+
+    public VulkanType WithArray(int? count) => this with { ArrayCount = count };
+    public VulkanType WithType(string type) => this with { Type = type };
 
     private static bool HasStar(string parent) => parent.Contains('*');
     private static int GetIndirection(string parent) => parent.Count(c => c == '*');
@@ -30,5 +35,7 @@ public sealed record VulkanType(string Type, bool IsPointer, int PointerIndirect
         return name == "PFN_vkVoidFunction" ? "delegate* unmanaged[Cdecl]<void>" : lookupTable.GetValueOrDefault(name, name);
     }
 
-    public override string ToString() => $"{Type}{(IsPointer ? new string('*', PointerIndirection) : "")}";
+    public override string ToString() =>
+        $"{Type}{(IsPointer ? new string('*', PointerIndirection) : "")}" +
+        $"{(IsArray ? $"[{ArrayCount}]" : "")}";
 }

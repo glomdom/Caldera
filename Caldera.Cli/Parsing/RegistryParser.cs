@@ -17,11 +17,11 @@ public static class RegistryParser {
 
         var enums = EnumParser.ParseFrom(doc);
         var bitmasks = BitmaskParser.ParseFrom(doc);
-        var constants = ConstantParser.ParseFrom(doc);
+        var constants = ConstantParser.ParseFrom(doc, ctx);
         var handles = HandleParser.ParseHandles(doc);
         var structs = StructParser.ParseFrom(doc, ctx);
         var unions = UnionParser.ParseFrom(doc, ctx);
 
-        return new VulkanRegistry(enums, bitmasks, constants, baseTypes, handles, structs, unions);
+        return new VulkanRegistry(enums, bitmasks, constants, baseTypes, handles, structs, unions, ctx.Arrays);
     }
 }

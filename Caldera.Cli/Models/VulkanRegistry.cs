@@ -1,4 +1,6 @@
-﻿namespace Caldera.Cli.Models;
+﻿using Caldera.Cli.Parsing;
+
+namespace Caldera.Cli.Models;
 
 public record VulkanRegistry(
     List<VulkanEnum> Enums,
@@ -7,5 +9,6 @@ public record VulkanRegistry(
     List<VulkanBaseType> BaseTypes,
     List<VulkanHandle> Handles,
     List<VulkanStruct> Structs,
-    List<VulkanUnion> Unions
+    List<VulkanUnion> Unions,
+    ArrayRegistry Arrays
 );

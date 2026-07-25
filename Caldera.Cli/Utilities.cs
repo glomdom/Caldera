@@ -35,4 +35,16 @@ public static class Utilities {
 
         _ => xmlType,
     };
+    
+    public static string GetFormattedTypeName(string type) {
+        return type switch {
+            "uint" => "UInt",
+            "ulong" => "ULong",
+            "float" => "Float",
+            "byte" => "Byte",
+            "char" => "Char",
+
+            _ => type,
+        };
+    }
 }

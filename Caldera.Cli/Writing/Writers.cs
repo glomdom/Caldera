@@ -1,5 +1,6 @@
 ﻿using Caldera.Cli.Generation;
 using Caldera.Cli.Models;
+using Caldera.Cli.Parsing;
 using Serilog;
 
 namespace Caldera.Cli.Writing;
@@ -7,10 +8,14 @@ namespace Caldera.Cli.Writing;
 public static class Writers {
     public static async Task WriteDefinitionsAsync(VulkanRegistry registry, string version) {
         var prologue = Metadata.GetPrologueString(version);
+        var noNsPrologue = Metadata.GetPrologueStringWithoutNs(version);
         var genCodeAttribute = $"[GeneratedCode(\"Caldera\", \"{version}\")]";
 
         await WriteConstantsAsync(registry.Constants, prologue, genCodeAttribute);
         Log.Information("Wrote API Constants");
+
+        await WriteInlineArraysAsync(registry.Arrays, noNsPrologue, genCodeAttribute);
+        Log.Information("Wrote {Count} arrays", registry.Arrays.All.Count);
 
         await WriteEnumsAsync(registry.Enums, prologue, genCodeAttribute);
         Log.Information("Wrote {Count} enums", registry.Enums.Count);
@@ -29,6 +34,22 @@ public static class Writers {
 
         await WriteUnionsAsync(registry.Unions, prologue, genCodeAttribute);
         Log.Information("Wrote {Count} unions", registry.Unions.Count);
+    }
+
+    private static async Task WriteInlineArraysAsync(ArrayRegistry arrays, string prologue, string genCodeAttribute) {
+        Directory.CreateDirectory("autogen/arrays");
+
+        await using var file = File.Create(Path.Combine("autogen", "arrays", "Arrays.cs"));
+        await using var writer = new StreamWriter(file);
+
+        await writer.WriteLineAsync($"{prologue}\n\nnamespace Caldera.Arrays;\n\n");
+
+        foreach (var arr in arrays.All) {
+            await writer.WriteLineAsync($"[InlineArray({arr.Count})]");
+            await writer.WriteLineAsync($"public struct {arr.TypeName} {{");
+            await writer.WriteLineAsync($"    private {arr.ElementType.Type} _e0;");
+            await writer.WriteLineAsync("}\n");
+        }
     }
 
     private static async Task WriteConstantsAsync(List<VulkanConstant> constants, string prologue, string genCodeAttribute) {

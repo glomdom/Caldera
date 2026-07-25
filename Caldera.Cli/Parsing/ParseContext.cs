@@ -6,6 +6,10 @@ public sealed class ParseContext {
     public Dictionary<string, string> BaseTypes { get; } = [];
     public Dictionary<string, VulkanFunctionPointer> FunctionPointers { get; } = [];
     public Dictionary<string, string> Aliases { get; } = [];
+    public Dictionary<string, VulkanConstant> Constants { get; } = [];
+    
+    public ArrayRegistry Arrays { get; } = new();
+    
     public List<string> BlockedTypes { get; } = [
         // video related
         "VkVideoEncodeH264SessionParametersAddInfoKHR",
@@ -21,6 +25,8 @@ public sealed class ParseContext {
         "nvscisync.h", "nvscibuf.h",
         "directfb.h",
         "ubm.h",
+        
+        // video related
         "vk_video/vulkan_video_codec_av1std.h", // todo: parse video.xml
         "vk_video/vulkan_video_codec_av1std_encode.h",
         "vk_video/vulkan_video_codec_av1std_decode.h",
