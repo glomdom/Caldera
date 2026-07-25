@@ -104,7 +104,9 @@ public static class Writers {
             structs, "structs", prologue, genCodeAttribute,
             def => $"{def.Name}.cs",
             def => $"[StructLayout(LayoutKind.Sequential)]\npublic {(def.HasPointers ? "unsafe struct" : "struct")} {def.Name} {{",
-            def => def.Members.Select(m => $"    public {m.Type} {m.Name};")
+            def => BitfieldPacker.EmitBody(
+                BitfieldPacker.Pack(def.Members.ToList()),
+                m => $"    public {m.Type} {m.Name};")
         );
 
     private static Task WriteUnionsAsync(List<VulkanUnion> unions, string prologue, string genCodeAttribute) =>
