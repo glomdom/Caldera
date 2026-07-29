@@ -2,6 +2,7 @@
   <Project Path="Caldera.Cli/Caldera.Cli.csproj" />
   <Project Path="Caldera.Core/Caldera.Core.csproj" />
   <Project Path="Caldera.Examples/Caldera.Examples.csproj" />
+  <Project Path="Caldera.Extensions/Caldera.Extensions.csproj" />
   <Project Path="Caldera.LayoutDumper/Caldera.LayoutDumper.csproj" />
   <Project Path="Caldera.Reader/Caldera.Reader.csproj" />
   <Project Path="Caldera/Caldera.csproj" />

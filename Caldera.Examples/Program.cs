@@ -2,9 +2,17 @@
 using Caldera.Core;
 using Caldera.Core.Diagnostics;
 
-var reader = new StructReader(new DiagnosticBag());
-var v = reader.Read(new XDocument());
+var rawRegistryText = File.ReadAllText(@"C:\VulkanSDK\1.4.350.0\share\vulkan\registry\vk.xml");
+var doc = XDocument.Parse(rawRegistryText, LoadOptions.SetLineInfo | LoadOptions.SetBaseUri | LoadOptions.PreserveWhitespace);
+var diagnostics = new DiagnosticBag();
+var reader = new BaseTypeReader(diagnostics, doc);
 
-foreach (var x in v) {
-    Console.WriteLine(x);
+var v = reader.Read();
+
+foreach (var diag in diagnostics.Render()) {
+    Console.Write(diag);
+}
+
+foreach (var type in v) {
+    Console.WriteLine(type);
 }

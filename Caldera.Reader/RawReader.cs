@@ -3,10 +3,11 @@ using Caldera.Core.Diagnostics;
 
 namespace Caldera.Core;
 
-public abstract class RawReader<T>(DiagnosticBag diagnostics) {
+public abstract class RawReader<T>(DiagnosticBag diagnostics, XDocument doc) {
     protected DiagnosticBag Diagnostics { get; } = diagnostics;
+    protected XDocument Document { get; } = doc;
 
-    public abstract IReadOnlyList<T> Read(XDocument doc);
+    public abstract IReadOnlyList<T> Read();
 
     protected string? RequiredAttr(XElement el, string name) {
         var attr = el.Attribute(name);

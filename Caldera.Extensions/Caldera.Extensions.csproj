@@ -6,9 +6,4 @@
         <Nullable>enable</Nullable>
     </PropertyGroup>
 
-    <ItemGroup>
-      <ProjectReference Include="..\Caldera.Core\Caldera.Core.csproj" />
-      <ProjectReference Include="..\Caldera.Extensions\Caldera.Extensions.csproj" />
-    </ItemGroup>
-
 </Project>
