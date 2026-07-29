@@ -25,7 +25,7 @@ public sealed class BaseTypeReader(DiagnosticBag diagnostics, XDocument doc) : R
         var typeElem = elem.Element("type");
 
         var suffix = (typeElem?.NextNode as XText)?.Value.Trim();
-        var lead = (typeElem?.LastNode as XText)?.Value.Trim(); // effectively the underlying type
+        var lead = (typeElem?.FirstNode as XText)?.Value.Trim(); // effectively the underlying type
 
         var type = new RawBaseType(
             Name: name,
