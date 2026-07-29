@@ -19,20 +19,14 @@ public sealed class BaseTypeReader(DiagnosticBag diagnostics, XDocument doc) : R
 
     private static RawBaseType CreateBaseType(XElement elem) {
         var name = elem.Element("name")!.Value;
-        var isOpaque = !elem.HasElement("type");
-        string? underlying = null;
-        string? suffix = null;
+        var typeElem = elem.Element("type");
 
-        if (!isOpaque) {
-            var typeElem = elem.Element("type")!;
-            underlying = typeElem.Value;
-
-            suffix = (typeElem.NextNode as XText)?.Value.Trim();
-        }
+        var suffix = (typeElem?.NextNode as XText)?.Value.Trim();
+        var lead = (typeElem?.LastNode as XText)?.Value.Trim(); // effectively the underlying type
 
         var type = new RawBaseType(
             Name: name,
-            UnderlyingType: underlying,
+            UnderlyingType: lead,
             RawText: elem.Value,
             Span: elem.GetSpan(),
             TypeSuffix: suffix
