@@ -9,8 +9,12 @@ var reader = new BaseTypeReader(diagnostics, doc);
 
 var v = reader.Read();
 
-foreach (var diag in diagnostics.Render()) {
-    Console.Write(diag);
+if (diagnostics.HasErrors) {
+    foreach (var diag in diagnostics.Render()) {
+        Console.Write(diag);
+    }
+
+    return;
 }
 
 foreach (var type in v) {

@@ -4,4 +4,5 @@ public enum DiagnosticCode {
     NonFatal,
     
     RequiredAttributeNotSet,
+    MissingXmlElement,
 }

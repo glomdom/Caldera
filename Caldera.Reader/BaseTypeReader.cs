@@ -9,7 +9,6 @@ public sealed class BaseTypeReader(DiagnosticBag diagnostics, XDocument doc) : R
     public override IReadOnlyList<RawBaseType> Read() {
         var nodes = Document.Descendants("type")
             .Where(x => x.Attribute("category")?.Value == "basetype")
-            .Where(x => x.HasElement("name"))
             .ToList();
 
         var result = nodes.Select(CreateBaseType).ToList();
@@ -17,7 +16,11 @@ public sealed class BaseTypeReader(DiagnosticBag diagnostics, XDocument doc) : R
         return result;
     }
 
-    private static RawBaseType CreateBaseType(XElement elem) {
+    private RawBaseType CreateBaseType(XElement elem) {
+        if (!elem.HasElement("name")) {
+            Diagnostics.Error(elem.GetSpan(), DiagnosticCode.MissingXmlElement, $"Parsed '{elem}' does not have a 'name' element.");
+        }
+
         var name = elem.Element("name")!.Value;
         var typeElem = elem.Element("type");
 
